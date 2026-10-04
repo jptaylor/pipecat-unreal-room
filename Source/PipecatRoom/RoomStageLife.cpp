@@ -109,10 +109,12 @@ FAutoConsoleCommandWithWorldAndArgs RoutineCommand(
 		}
 	}));
 
-const FLinearColor Blooms[] = {
-	FLinearColor(0.75f, 0.05f, 0.08f), FLinearColor(0.95f, 0.55f, 0.05f), FLinearColor(0.9f, 0.3f, 0.5f),
-	FLinearColor(0.95f, 0.93f, 0.9f), FLinearColor(0.35f, 0.18f, 0.7f),
-};
+// A flower from the conservatory's bed, at random.
+const RoomTypes::FRoomBloom& AnyBloom()
+{
+	const TConstArrayView<RoomTypes::FRoomBloom> Blooms = RoomTypes::Blooms();
+	return Blooms[FMath::RandRange(0, Blooms.Num() - 1)];
+}
 } // namespace
 
 //
@@ -207,7 +209,7 @@ void ARoomStage::UpdatePrompt(float DeltaSeconds)
 		if (GiveTarget.IsValid())
 		{
 			Action = EAction::GiveTo;
-			Label = FString::Printf(TEXT("Give %s to %s"), RoomTypes::ItemName(PlayerItem->GetKind()), *Called(GiveTarget.Get()));
+			Label = FString::Printf(TEXT("Give %s to %s"), *PlayerItem->GetName(), *Called(GiveTarget.Get()));
 		}
 	}
 	// Something to do with a thing.
@@ -222,8 +224,8 @@ void ARoomStage::UpdatePrompt(float DeltaSeconds)
 	{
 		const bool bFood = RoomTypes::IsFood(PlayerItem->GetKind());
 		Action = bFood ? EAction::Eat : EAction::PutDown;
-		Label = bFood ? FString::Printf(TEXT("Eat %s"), RoomTypes::ItemName(PlayerItem->GetKind()))
-					  : FString::Printf(TEXT("Put %s down"), RoomTypes::ItemName(PlayerItem->GetKind()));
+		Label = bFood ? FString::Printf(TEXT("Eat %s"), *PlayerItem->GetName())
+					  : FString::Printf(TEXT("Put %s down"), *PlayerItem->GetName());
 	}
 	Captions->SetPrompt(Label);
 }
@@ -249,28 +251,13 @@ void ARoomStage::Interact()
 			return;
 		}
 		PlayerItem = nullptr;
-		const ERoomItem Kind = Item->GetKind();
 		Character->Hold(Item);
 		URoomMusic::PlaySound(GetWorld(), Character->GetActorLocation(), ERoomSound::Chime, 0.6f);
 		TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
 		Data->SetStringField(TEXT("to"), Character->GetId());
-		Data->SetStringField(TEXT("item"), RoomTypes::ItemName(Kind));
+		Data->SetStringField(TEXT("item"), Item->GetName());
 		Event(TEXT("gift"), Data, Witnesses(Where, SeenFrom));
-		// Something to eat, they eat, if they're not busy.
-		if (RoomTypes::IsFood(Kind) && !Character->IsBusy())
-		{
-			TWeakObjectPtr<ARoomCharacter> Eater(Character);
-			Character->Do({FRoomStep::Make(ERoomGesture::Eat), FRoomStep::Call([Eater]() {
-							  if (Eater.IsValid())
-							  {
-								  if (ARoomItem* Eaten = Eater->Release())
-								  {
-									  Eaten->Vanish();
-								  }
-							  }
-						  })},
-				FString::Printf(TEXT("eating %s"), RoomTypes::ItemName(Kind)));
-		}
+		EatHeld(Character);
 		return;
 	}
 	case EAction::Eat:
@@ -322,11 +309,12 @@ void ARoomStage::Interact()
 	else if (Thing == TEXT("flowers") || Thing == TEXT("tomatoes") || Thing == TEXT("cake"))
 	{
 		const ERoomItem Kind = Thing == TEXT("flowers") ? ERoomItem::Flower : (Thing == TEXT("tomatoes") ? ERoomItem::Tomato : ERoomItem::Cake);
-		PlayerHolds(ARoomItem::Make(GetWorld(), Kind, PlayerHand(), Blooms[FMath::RandRange(0, UE_ARRAY_COUNT(Blooms) - 1)]));
+		const RoomTypes::FRoomBloom& Bloom = AnyBloom();
+		PlayerHolds(ARoomItem::Make(GetWorld(), Kind, PlayerHand(), Bloom.Color, Kind == ERoomItem::Flower ? Bloom.Name : TEXT("")));
 		URoomMusic::PlaySound(GetWorld(), Where, ERoomSound::Pop, 0.5f);
 		// Whose it is might have something to say about it.
 		const FName Area = Kind == ERoomItem::Cake ? FName(TEXT("kitchen")) : FName(TEXT("conservatory"));
-		Data->SetStringField(TEXT("item"), RoomTypes::ItemName(Kind));
+		Data->SetStringField(TEXT("item"), PlayerItem ? PlayerItem->GetName() : FString(RoomTypes::ItemName(Kind)));
 		if (const ARoomCharacter* Whose = Owner(Area))
 		{
 			Data->SetStringField(TEXT("owner"), Whose->GetId());
@@ -349,18 +337,27 @@ void ARoomStage::Interact()
 // What the characters do
 //
 
-void ARoomStage::Act(ARoomCharacter* Character, const FString& What)
+void ARoomStage::Act(ARoomCharacter* Character, const FString& What, ARoomCharacter* For, const FString& Color)
 {
 	if (!Character || !Things)
 	{
 		return;
 	}
-	UE_LOG(LogRoomLife, Log, TEXT("%s: sets about %s"), *Character->GetId(), *What);
+	UE_LOG(LogRoomLife, Log, TEXT("%s: sets about %s%s%s"), *Character->GetId(), *What, For ? TEXT(" for ") : TEXT(""),
+		For ? *For->GetId() : TEXT(""));
 	TWeakObjectPtr<ARoomThings> Stuff(Things);
-	APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+	// Who it's for: the player, unless it's someone else.
+	AActor* Player = For ? static_cast<AActor*>(For) : UGameplayStatics::GetPlayerPawn(this, 0);
+	const FString Whom = For ? For->GetCast().Name : FString(TEXT("the person"));
 
 	if (What == TEXT("dance"))
 	{
+		// Only to music: a record on the gramophone.
+		if (!Things->IsGramophoneOn())
+		{
+			UE_LOG(LogRoomLife, Log, TEXT("%s: no music to dance to"), *Character->GetId());
+			return;
+		}
 		Character->StopDoing();
 		Character->SetDancing(true, false);
 	}
@@ -467,7 +464,7 @@ void ARoomStage::Act(ARoomCharacter* Character, const FString& What)
 		{
 			Steps.Add(FRoomStep::GiveTo(Player));
 		}
-		Character->Do(MoveTemp(Steps), What == TEXT("cook") ? TEXT("baking a cake") : FString::Printf(TEXT("fetching the person %s"),
+		Character->Do(MoveTemp(Steps), What == TEXT("cook") ? TEXT("baking a cake") : FString::Printf(TEXT("fetching %s %s"), *Whom,
 			bTomato ? TEXT("a tomato") : TEXT("some cake")), [Stuff]() {
 			if (Stuff.IsValid())
 			{
@@ -478,13 +475,23 @@ void ARoomStage::Act(ARoomCharacter* Character, const FString& What)
 	else if (What == TEXT("flower"))
 	{
 		const FRoomSpot Spot = Things->GetFlowerSpot();
+		// The color asked for, if there's one like it; otherwise, whichever.
+		const RoomTypes::FRoomBloom* Asked = nullptr;
+		for (const RoomTypes::FRoomBloom& Each : RoomTypes::Blooms())
+		{
+			if (!Color.IsEmpty() && FString(Each.Name).Contains(Color))
+			{
+				Asked = &Each;
+			}
+		}
+		const RoomTypes::FRoomBloom& Bloom = Asked ? *Asked : AnyBloom();
 		TArray<FRoomStep> Steps = {FRoomStep::WalkTo(Spot.Location, Spot.Yaw), FRoomStep::Make(ERoomGesture::Bow),
-			FRoomStep::TakeItem(ERoomItem::Flower, Blooms[FMath::RandRange(0, UE_ARRAY_COUNT(Blooms) - 1)])};
+			FRoomStep::TakeItem(ERoomItem::Flower, Bloom.Color, Bloom.Name)};
 		if (Player)
 		{
 			Steps.Add(FRoomStep::GiveTo(Player));
 		}
-		Character->Do(MoveTemp(Steps), TEXT("picking the person a flower"));
+		Character->Do(MoveTemp(Steps), FString::Printf(TEXT("picking %s %s"), *Whom, Bloom.Name));
 	}
 	else if (What == TEXT("water"))
 	{
@@ -510,9 +517,19 @@ void ARoomStage::Act(ARoomCharacter* Character, const FString& What)
 			}
 		});
 	}
+	else if (What == TEXT("introduce") && For && House.IsValid())
+	{
+		// Over to whoever the player's to meet, to wait for the player there.
+		Introductions.RemoveAll([Character](const FIntroduction& Each) { return Each.Host == Character; });
+		Introductions.Add({Character, For, Clock});
+		Character->SetIntent(ERoomIntent::Wait);
+		const FVector Spot = House->FindSpotBy(For->GetActorLocation(), Character->GetActorLocation(), 140.0f);
+		const float Yaw = (For->GetActorLocation() - Spot).Rotation().Yaw;
+		Character->Do({FRoomStep::WalkTo(Spot, Yaw)}, FString::Printf(TEXT("taking the person to meet %s"), *For->GetCast().Name));
+	}
 	else if (What == TEXT("hand") && Character->GetHeld() && Player)
 	{
-		Character->Do({FRoomStep::GiveTo(Player)}, FString::Printf(TEXT("handing the person %s"), RoomTypes::ItemName(Character->GetHeldKind())));
+		Character->Do({FRoomStep::GiveTo(Player)}, FString::Printf(TEXT("handing %s %s"), *Whom, *Character->GetHeld()->GetName()));
 	}
 }
 
@@ -524,16 +541,81 @@ void ARoomStage::Give(ARoomCharacter* Giver, AActor* To)
 		return;
 	}
 	URoomMusic::PlaySound(GetWorld(), Giver->GetActorLocation(), ERoomSound::Chime, 0.6f);
-	if (ARoomCharacter* Other = Cast<ARoomCharacter>(To))
-	{
-		Other->Hold(Item);
-		return;
-	}
-	PlayerHolds(Item);
 	TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("who"), Giver->GetId());
-	Data->SetStringField(TEXT("item"), RoomTypes::ItemName(Item->GetKind()));
+	Data->SetStringField(TEXT("item"), Item->GetName());
+	ARoomCharacter* Other = Cast<ARoomCharacter>(To);
+	if (Other)
+	{
+		Other->Hold(Item);
+		Data->SetStringField(TEXT("to"), Other->GetId());
+	}
+	else
+	{
+		PlayerHolds(Item);
+	}
 	Event(TEXT("handed"), Data, Witnesses(Giver->GetActorLocation(), SeenFrom));
+	if (Other)
+	{
+		EatHeld(Other);
+	}
+}
+
+void ARoomStage::UpdateIntroductions()
+{
+	const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+	for (int32 I = Introductions.Num() - 1; I >= 0; --I)
+	{
+		const FIntroduction& Each = Introductions[I];
+		ARoomCharacter* Host = Each.Host.Get();
+		ARoomCharacter* Guest = Each.Guest.Get();
+		// Given up on, after a couple of minutes, or if the host's been sent elsewhere.
+		if (!Host || !Guest || !Player || Clock - Each.Since > 150.0 || Host->GetIntent() != ERoomIntent::Wait)
+		{
+			Introductions.RemoveAt(I);
+			continue;
+		}
+		if (Host->IsBusy())
+		{
+			continue;  // still on the way
+		}
+		const FVector Head = PlayerHead();
+		const bool bTogether = Reaches(Host->GetHeadLocation(), Guest->GetHeadLocation(), CharacterRange, Host, Guest) &&
+							   Reaches(Host->GetHeadLocation(), Head, CharacterRange, Host, Player) &&
+							   Reaches(Guest->GetHeadLocation(), Head, CharacterRange, Guest, Player);
+		if (!bTogether)
+		{
+			continue;
+		}
+		Host->TalkTo(Guest);
+		Guest->LookAt(Host, 6.0f);
+		TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("who"), Host->GetId());
+		Data->SetStringField(TEXT("to"), Guest->GetId());
+		Event(TEXT("introduce"), Data, Witnesses(Host->GetActorLocation(), SeenFrom));
+		Introductions.RemoveAt(I);
+	}
+}
+
+void ARoomStage::EatHeld(ARoomCharacter* Character)
+{
+	// Something to eat, they eat, if they're not busy.
+	const ARoomItem* Item = Character ? Character->GetHeld() : nullptr;
+	if (!Item || !RoomTypes::IsFood(Item->GetKind()) || Character->IsBusy())
+	{
+		return;
+	}
+	TWeakObjectPtr<ARoomCharacter> Eater(Character);
+	Character->Do({FRoomStep::Make(ERoomGesture::Eat), FRoomStep::Call([Eater]() {
+					  if (Eater.IsValid())
+					  {
+						  if (ARoomItem* Eaten = Eater->Release())
+						  {
+							  Eaten->Vanish();
+						  }
+					  }
+				  })},
+		FString::Printf(TEXT("eating %s"), *Item->GetName()));
 }
 
 //
@@ -592,8 +674,9 @@ void ARoomStage::UpdateLife(float DeltaSeconds)
 		{
 			Character->SetDancing(true, true);
 		}
-		else if (Character->IsDancingToMusic() && (Strength < 0.3f || !Things->IsGramophoneOn()))
+		else if (Character->IsDancing() && (!Things->IsGramophoneOn() || (Character->IsDancingToMusic() && Strength < 0.3f)))
 		{
+			// The music's stopped, or they've wandered out of earshot of it.
 			Character->SetDancing(false);
 		}
 
@@ -641,6 +724,7 @@ void ARoomStage::UpdateLife(float DeltaSeconds)
 	}
 	// The music's quieter while anyone speaks over it.
 	Things->Duck(bAnyVoice ? 1.0f : 0.0f);
+	UpdateIntroductions();
 }
 
 void ARoomStage::Routine(ARoomCharacter* Character)

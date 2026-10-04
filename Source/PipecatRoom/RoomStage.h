@@ -44,6 +44,15 @@ public:
 	UPROPERTY(Config)
 	FString CastFile = TEXT("bot/characters.json");
 
+	/**
+	 * How the game talks to the bot: "daily" (`bot.py -t daily`, each
+	 * character's voice on a Daily track of its own) or "websocket"
+	 * (`bot.py -t websocket`, their voices as the channels of one stream).
+	 * -PipecatTransport= on the command line wins.
+	 */
+	UPROPERTY(Config)
+	FString Transport = TEXT("daily");
+
 	/** How far the player's voice carries at their usual loudness, in cm, and at most and at least. */
 	UPROPERTY(Config)
 	float NormalRange = 600.0f;
@@ -58,9 +67,23 @@ public:
 	UPROPERTY(Config)
 	float ThroughWalls = 0.5f;
 
-	/** How far a character's voice carries, in cm. */
+	/** How far a character's voice carries, in cm: who hears them, the player included. */
 	UPROPERTY(Config)
-	float CharacterRange = 750.0f;
+	float CharacterRange = 650.0f;
+
+	/**
+	 * How the characters' voices sound with distance: at full volume within
+	 * so many cm, fading out over so many more, and how loud through a wall,
+	 * from 0 to 1.
+	 */
+	UPROPERTY(Config)
+	float VoiceFullWithin = 150.0f;
+
+	UPROPERTY(Config)
+	float VoiceFadesOver = 850.0f;
+
+	UPROPERTY(Config)
+	float VoiceThroughWalls = 0.3f;
 
 	/** Within this many cm, in plain view, the player comes up to a character, who greets them. */
 	UPROPERTY(Config)
@@ -73,6 +96,14 @@ public:
 	 */
 	UPROPERTY(Config)
 	float SpeechMinDb = -46.0f;
+
+	/**
+	 * Sends the bot the microphone only while the player is speaking, and
+	 * silence otherwise, so the game's own music and voices, if the microphone
+	 * picks them up, aren't taken for the player.
+	 */
+	UPROPERTY(Config)
+	bool bGateMicrophone = true;
 
 	/** The bot's start endpoint, and its API key, if it needs one. Set before play begins. */
 	FString StartUrl;
@@ -96,7 +127,8 @@ public:
 	/** Whatever the player can do where they are, as they press E. */
 	void Interact();
 	/** Has a character do something, as the bot asks, e.g. "dance", "play" (the piano) or "food". */
-	void Act(ARoomCharacter* Character, const FString& Action);
+	/** Has a character do something: for the player, or for `For`, another character, e.g. bring them cake. */
+	void Act(ARoomCharacter* Character, const FString& Action, ARoomCharacter* For = nullptr, const FString& Color = FString());
 	/** For trying it out: has a character go about their day now, or visit another. */
 	void Routine(ARoomCharacter* Character);
 	void Visit(ARoomCharacter* Visitor, ARoomCharacter* Host);
@@ -142,6 +174,19 @@ private:
 	TArray<FString> Witnesses(const FVector& Where, float Carry) const;
 	// A character hands what they're holding to someone.
 	void Give(ARoomCharacter* Giver, AActor* To);
+	// A character eats what they're holding, if it's food and they're free.
+	void EatHeld(ARoomCharacter* Character);
+
+	// Someone taking the player to meet someone else: once they're all within
+	// earshot of each other, they introduce them (the `introduce` event).
+	struct FIntroduction
+	{
+		TWeakObjectPtr<ARoomCharacter> Host;
+		TWeakObjectPtr<ARoomCharacter> Guest;
+		double Since = 0.0;
+	};
+	TArray<FIntroduction> Introductions;
+	void UpdateIntroductions();
 	void PlayerHolds(ARoomItem* Item);
 	USkeletalMeshComponent* PlayerHand() const;
 	FString Called(const ARoomCharacter* Character) const;
@@ -228,6 +273,25 @@ private:
 	// Whose names the player has heard, and who's speaking, by the bot.
 	TSet<FString> Known;
 	TSet<FString> Speaking;
+
+	// Each character's line as it's said: shown from when their voice is heard,
+	// a word at a time, and all of it once their voice has finished.
+	struct FSaying
+	{
+		FString Id;
+		FString Text;
+		// About how many of its characters have been said, and how many are shown.
+		float Said = 0.0f;
+		int32 Shown = 0;
+		float Clarity = -1.0f;
+		float SinceVoice = 10.0f;
+		bool bHeard = false;
+		// The bot says their voice has stopped; and so it's all been said.
+		bool bEnding = false;
+		bool bWhole = false;
+	};
+	TMap<FString, FSaying> Sayings;
+	void UpdateSaying(ARoomCharacter* Character, FSaying& Saying, float ChannelLevel, float DeltaSeconds);
 	TMap<FString, FString> Lines;
 	// When each character was last logged speaking, by their voice.
 	TMap<FString, double> LoggedVoice;

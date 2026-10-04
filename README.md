@@ -9,10 +9,11 @@ from where they stand.
 - **Theo**, a chef, is in the kitchen.
 - **Juno**, a musician, is in the music room.
 
-Nobody tells you their name until you ask. As you speak, a ring around you
-shows how far your voice carries. Speak up and it carries further; through a
-wall it carries half as far. Only the people inside it hear you. Call Maya from
-the hall and she won't hear you, but Theo might, if he's close, and say so.
+Nobody speaks to you until you speak to them, and nobody tells you their name
+until you ask. As you speak, a ring around you shows how far your voice
+carries. Speak up and it carries further; through a wall it carries half as
+far. Only the people inside it hear you. Call Maya from the hall and she won't
+hear you, but Theo might, if he's close, and say so.
 
 Talk to whoever's near: one of them by name, or everyone at once ("who wants
 cake?"). They answer, talk among themselves, tease each other and react, just
@@ -98,7 +99,8 @@ $env:UE_ROOT = "C:\Program Files\Epic Games\UE_5.8"
 $env:PIPECAT_CLIENT_CXX = "C:\path\to\pipecat-client-cxx"
 ```
 
-1. Build the Pipecat C++ client and its WebSocket transport for the plugin
+1. Build the Pipecat C++ client and its Daily and WebSocket transports for the
+   plugin (this downloads Daily's Core C++ SDK the first time)
    (into `Plugins\Pipecat\ThirdParty\Win64`):
 
    ```
@@ -123,15 +125,22 @@ In cmd.exe, use `set` for the variables, and the `.bat` next to each script.
 
 ## 🚀 Run
 
-1. Start the bot, with your API keys in `bot\.env`:
+1. Start the bot, with your API keys in `bot\.env` (`DAILY_API_KEY` too). The
+   game and the bot meet in a Daily room, where each character's voice is an
+   audio track of its own, so they can all talk at once. The bot's Daily
+   transport (daily-python) is for Linux and macOS, so on Windows it runs in
+   WSL (`wsl --install`, once):
 
    ```
    cd bot
    copy env.example .env   # then set the API keys in it
-   uv run bot.py -t websocket
+   wsl bash ./run-wsl.sh
    ```
 
-   It waits for the game at `http://localhost:7860`.
+   It waits for the game at `http://localhost:7860`. Or, without WSL, run the
+   bot over a WebSocket with `uv run bot.py -t websocket`, and start the game
+   with `-PipecatTransport=websocket` (or set `Transport=websocket` in
+   `Config/DefaultGame.ini`).
 
 2. In another terminal, open the game in the editor and press Play, or run it
    on its own:
@@ -179,9 +188,15 @@ the game  ── microphone ──►  room      transport → Deepgram Flux →
     house, and who saw or heard it. They know it, and whoever it's most about
     says something, as soon as nobody's talking. The game also tells the bot
     what each of them is doing and holding, and whether there's music or cake.
-  - **Meeting.** When you first come up to someone, they say hi (`met`).
-  - **Their voices** (`mixer.py`) go to the game as one stream with a channel
-    per character, paced in real time, so voices said at once play at once.
+  - **Meeting.** Someone you haven't talked with yet waits for you to speak
+    first, and only those you've talked with pick up a quiet moment. Jev knows
+    who you've met, so "oh, hello, who are you?" goes to the stranger, not to
+    the friend beside them.
+  - **Their voices** go to the game each on its own: over Daily, as an audio
+    track per character (a transport destination each), which the game reads
+    as a channel each; over a WebSocket, as one stream with a channel per
+    character, paced in real time (`mixer.py`). Either way, voices said at
+    once play at once, each from its character's head.
 - **The game** (`Source/PipecatRoom`):
   - `RoomHouse` builds the house: walls with doorways and windows, flat colors,
     the sun through the windows and skylights, lamps that swing, stage lights
@@ -237,10 +252,12 @@ In the console (`` ` ``):
   day now, or visit someone.
 - `room.MusicVolume 0.5`: how loud the house's music and sounds are.
 
-`Config/DefaultGame.ini` has how quiet a voice can be (`SpeechMinDb`), how far voices carry (`NormalRange`, `MaxRange`,
-`ThroughWalls`, `CharacterRange`), and `bot/characters.json` has who the
-characters are: their names, colors, voices, mannequins and rooms. The game
-reads it too. Each character's persona is in `bot/prompts/<id>.md`, and the
+`Config/DefaultGame.ini` has how quiet your voice can be (`SpeechMinDb`), how
+far voices carry (`NormalRange`, `MaxRange`, `ThroughWalls`, `CharacterRange`),
+and how the characters' voices fade with distance and through walls
+(`VoiceFullWithin`, `VoiceFadesOver`, `VoiceThroughWalls`). `bot/characters.json`
+has who the characters are: their names, colors, voices, mannequins and rooms.
+The game reads it too. Each character's persona is in `bot/prompts/<id>.md`, and the
 house they share is in `bot/prompts/character.md`.
 
 To use PhoneLLM instead of OpenAI, as the kitchen table does, set

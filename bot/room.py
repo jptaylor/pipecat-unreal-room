@@ -27,10 +27,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
+from difflib import SequenceMatcher
 from typing import Any
 
 from loguru import logger
@@ -67,6 +69,7 @@ TRUE_OF = "true:"  # ...prefix of the per-character yes/no questions: is it true
 INTENT = "intent"  # ...and what the user wants as host
 MOVE = "move"  # ...whether they ask whoever they're talking to to move
 ACT = "act"  # ...or to do something: dance, play the piano, bring them cake…
+FOR = "for"  # ...and, for something to bring or hand over, who it's for
 FEEL = "feel"  # ...and how those listening take it
 ANSWER, CARRY_ON, HUSH = "answer", "carry_on", "hush"
 STAY, COME, FOLLOW, WAIT, HOME = "stay", "come", "follow", "wait", "home"
@@ -117,13 +120,23 @@ ACTS = {
     "music_off": "stop the music: 'turn the music off', 'stop playing', 'that's enough music'",
     "cook": "cook or bake something: 'bake a cake', 'make something to eat', 'cook dinner'",
     "food": (
-        "bring the user something to eat: 'can I have some cake?', 'I'm hungry', 'got anything "
-        "to eat?', 'a tomato, please'"
+        "bring someone something to eat, the user or someone else: 'can I have some cake?', "
+        "'I'm hungry', 'got anything to eat?', 'a tomato, please', 'bring Maya a slice'"
     ),
-    "flower": "pick the user a flower: 'can I have a flower?', 'pick me a flower'",
+    "flower": (
+        "pick someone a flower, the user or someone else: 'can I have a flower?', 'pick me a "
+        "flower', 'give Juno a flower'"
+    ),
     "water": "water the plants: 'water the plants', 'make the plants grow'",
     "stop": "stop what they're doing: 'stop dancing', 'you can stop playing now', 'stop cooking'",
-    "hand": "hand the user what they're holding: 'give me that', 'can I have it?', 'pass it here'",
+    "hand": (
+        "hand what they're holding to someone, the user or someone else: 'give me that', 'can I "
+        "have it?', 'pass it here', 'give that to Theo'"
+    ),
+    "introduce": (
+        "take the user to meet someone, and introduce them: 'can you introduce me to Juno?', "
+        "'I'd like to meet Theo', 'take me to meet your friends'"
+    ),
 }
 # ...and as they set about it themselves, as they say a line.
 DOINGS = {
@@ -143,7 +156,17 @@ DOINGS = {
     "hand": "hands the user what they're holding: 'here, take it'",
 }
 # The acts only one character does, even asked of several (one cake, one pianist).
-SINGULAR_ACTS = {"play", "music_on", "music_off", "cook", "food", "flower", "water", "hand"}
+SINGULAR_ACTS = {
+    "play",
+    "music_on",
+    "music_off",
+    "cook",
+    "food",
+    "flower",
+    "water",
+    "hand",
+    "introduce",
+}
 
 GESTURES = {
     "none": "no particular gesture, as with most lines",
@@ -341,6 +364,15 @@ class Transcript:
         if latest.heard_by is not None:
             heard = [self.label(c) for c in self.cast if c in latest.heard_by]
             said["heard_by"] = heard or "nobody"
+            # The user may have walked away from whoever they spoke to last.
+            away = [
+                self.label(c) for c in last_addressed if c in self.cast and c not in latest.heard_by
+            ]
+            if latest.speaker == USER and away:
+                said["out_of_earshot"] = (
+                    f"{names(away)}, whom the user spoke to last, "
+                    f"{'is' if len(away) == 1 else 'are'} too far away now to hear this"
+                )
         state["latest"] = said
         return state
 
@@ -371,10 +403,6 @@ NOTE_WELCOME = (
     "The person has just walked in, and everyone at the table says hi at once, out loud. Say hi "
     "to them in a few words, in character, the way only you would."
 )
-NOTE_MEET = (
-    "The person has just come up to you, for the first time. Say hi to them, or remark on them "
-    "turning up, in a few words, in character. Don't tell them your name unless they ask."
-)
 NOTE_NOT_HEARD = (
     "The person said that to {other}, who is too far away to hear it; you heard it. Answer the "
     "person yourself in one short sentence: you might tell them {other} can't hear them from here."
@@ -386,15 +414,49 @@ NOTE_ACT = {
     "music_off": "As you answer, you go and turn the music off.",
     "cook": "As you answer, you head to the stove in the kitchen to bake a cake.",
     "food": "As you answer, you go to get the person something to eat, to bring it to them.",
-    "flower": "As you answer, you go to pick the person a flower, to bring it to them.",
+    "flower": (
+        "As you answer, you go to pick the person a flower, to bring it to them. Don't say what "
+        "color it'll be: you'll see when you've picked it."
+    ),
     "water": "As you answer, you go to water the plants in the conservatory.",
     "stop": "As you answer, you stop what you're doing.",
     "hand": "As you answer, you hand the person what you're holding.",
 }
+# ...asked to dance with no music on: they ask for some first...
+NOTE_NO_MUSIC = (
+    "There's no music on, so you don't dance yet: tell the person to put a record on the "
+    "gramophone in the hall first, in your own words."
+)
+# ...a flower in the color asked for...
+NOTE_FLOWER_COLOR = "As you answer, you go to pick {to} a {color} flower, to bring it to them."
+# ...and when what they bring or hand over is for someone else.
+NOTE_ACT_FOR = {
+    "food": "As you answer, you go to get {to} something to eat, to bring it to them.",
+    "flower": (
+        "As you answer, you go to pick {to} a flower, to bring it to them. Don't say what color "
+        "it'll be: you'll see when you've picked it."
+    ),
+    "hand": "As you answer, you hand {to} what you're holding.",
+    "introduce": (
+        "{to} isn't here, so as you answer, you lead the way to them: tell the person to follow "
+        "you, in your own words ('sure, follow me!'). Don't introduce them yet: you will once "
+        "you're all together."
+    ),
+}
+# ...asked to introduce the user to someone who's right there.
+NOTE_INTRODUCE_HERE = (
+    "{to} is right here: as you answer, you turn to them, to introduce the person. Don't "
+    "introduce them yet: you will in a moment."
+)
+# ...asked to introduce the user, without saying to whom.
+NOTE_INTRODUCE_WHOM = "Ask the person who they'd like to meet."
 # Something that happened in the house: what's said by whoever reacts to it...
 NOTE_EVENT = {
     "gift": "The person has just given you {item}. React to it out loud, in a few words, in character.",
     "handed": "You've just handed the person {item}. Say something as you do, in a few words.",
+    "received": (
+        "{who} has just handed you {item}. React to it out loud, in a few words, in character."
+    ),
     "bell": (
         "Someone has just rung the dinner bell in the kitchen, and you're heading there. Say "
         "something about it out loud, in a few words, in character."
@@ -421,11 +483,17 @@ NOTE_EVENT = {
         "You've just dropped in on {to} in {place} for a chat. Say something to {to} by name: a "
         "bit of news, a question, or a tease, in one or two short sentences."
     ),
+    "introduce": (
+        "You've brought the person to meet {to}, and you're all together now. Introduce them to "
+        "each other, warmly: tell {to} who the person is (by name, if they've told you it), and "
+        "tell the person who {to} is, with something nice or funny about each. Two or three short "
+        "sentences."
+    ),
 }
 # ...and what everyone who saw or heard it knows, in the transcript.
 NOTE_HAPPENED = {
     "gift": "The person gave {to} {item}.",
-    "handed": "{who} handed the person {item}.",
+    "handed": "{who} handed {to} {item}.",
     "bell": "Someone rang the dinner bell in the kitchen.",
     "music_on": "The person put a record on the gramophone in the hall.",
     "music_off": "The person stopped the music.",
@@ -434,6 +502,7 @@ NOTE_HAPPENED = {
     "wish": "The person tossed a coin into the fountain and made a wish.",
     "baked": "{who} baked a cake; it's on the kitchen island.",
     "visit": "{who} dropped in on {to} in {place} for a chat.",
+    "introduce": "{who} introduced the person to {to}.",
 }
 NOTE_MOVE = {
     COME: "As you answer, you walk over to the person.",
@@ -490,13 +559,24 @@ def addressee_question(cast: Sequence[Character]) -> ChoiceQuestion:
                 "A reply to what a character just said or asked goes to that character.",
                 "A follow-up that carries on the user's previous question, such as 'and number?', "
                 "'why?' or 'really?', goes to whoever they spoke to last (`user_last_spoke_to`), "
-                "unless it names someone else.",
+                "unless it names someone else, or they've walked away from them "
+                "(`latest.out_of_earshot`).",
+                "The user walks around the house. Once they've walked away from whoever they "
+                "spoke to last (`latest.out_of_earshot`), anything without that person's name is "
+                "for those with them now (`latest.heard_by`, `with_the_user`), not for whoever "
+                "they spoke to last.",
                 "A correction such as 'not you' or 'I meant the other one' goes to someone other "
                 "than the character who just spoke.",
                 "With no name and nothing to reply to, the subject decides: whoever knows it best "
                 "in `characters`.",
-                "A greeting, a goodbye, thanks or a question with no name for the whole table "
-                "('hello!', 'who wants cake?') is for everyone.",
+                "Meeting someone new: a greeting or a question for someone they don't know yet "
+                "('oh, hello, who are you?', 'and you are?', 'nice to meet you', 'what's your "
+                "name?'), with someone they've already talked with (`user_has_talked_with`) "
+                "among those who heard it, is for whoever they haven't met (`user_has_not_met`): "
+                "one of them, or all of them if there are several. They already know the ones "
+                "they've talked with.",
+                "Otherwise, a greeting, a goodbye, thanks or a question with no name for the "
+                "whole table ('hello!', 'who wants cake?') is for everyone.",
                 "`latest.heard_by` is who was close enough to hear it. With no name, it's for "
                 "them: one of them, or all of them. A name still says who, even someone who "
                 "didn't hear it.",
@@ -505,9 +585,14 @@ def addressee_question(cast: Sequence[Character]) -> ChoiceQuestion:
         options={
             **{c.id: {"who": c.name} for c in cast},
             GROUP: {
-                "who": ("several of them at once: everyone, or two or more of them named together"),
+                "who": (
+                    "several of them at once: everyone, both of them, or two or more of them "
+                    "named together"
+                ),
                 "examples": [
                     "Hello!",
+                    "You two, follow me.",
+                    "Both of you, come with me.",
                     "Who's here?",
                     "Who wants cake?",
                     "What do you all think?",
@@ -533,7 +618,11 @@ def included_question(character: Character) -> YesNoQuestion:
             f"{name} said, or carries on their previous question and {name} was among those they "
             "spoke to last (`user_last_spoke_to`)"
         ),
-        no=f"the user is talking to someone else, or to a few others that leave {name} out",
+        no=(
+            f"the user is talking to someone else, or to a few others that leave {name} out, or "
+            f"they're meeting someone new ('who are you?', 'nice to meet you') and have already "
+            f"talked with {name} (`user_has_talked_with`)"
+        ),
     )
 
 
@@ -805,6 +894,42 @@ def act_question() -> ChoiceQuestion:
     )
 
 
+def for_question(cast: Sequence[Character]) -> ChoiceQuestion:
+    """Who something the user asks to be brought or handed over is for: them, or someone else."""
+    options: dict[str, Any] = {
+        USER: {
+            "who": (
+                "the user themselves, or nothing's being brought, handed over or introduced: 'can "
+                "I have…', 'bring me…', 'give me…', 'I'm hungry'"
+            )
+        },
+        **{
+            c.id: {
+                "who": (
+                    f"{c.name}: 'give {c.name} a flower', 'bring {c.name} some cake', 'hand that "
+                    f"to {c.name}', 'get {c.name} something to eat', 'introduce me to {c.name}'"
+                )
+            }
+            for c in cast
+        },
+    }
+    return ChoiceQuestion(
+        instructions={
+            "question": (
+                "In `latest`, if the user asks for something to be brought, given or handed over "
+                "(something to eat, a flower, or what someone is holding), who is it for? Or, if "
+                "they ask to be introduced to someone, who do they want to meet?"
+            ),
+            "clues": [
+                "It's for the user unless they name someone else to give it to.",
+                "Whoever is asked to do it isn't who it's for: 'Theo, give Maya some cake' is for "
+                "Maya.",
+            ],
+        },
+        options=options,
+    )
+
+
 def doing_question(speaker: Character) -> ChoiceQuestion:
     """Whether `speaker` sets about doing something as they say their line."""
     return ChoiceQuestion(
@@ -900,6 +1025,7 @@ class Reading:
     react: dict[str, float] = field(default_factory=dict)  # a reply read: each id, NOBODY
     move: dict[str, float] = field(default_factory=dict)  # a route: STAY, COME, … or GO + area
     act: dict[str, float] = field(default_factory=dict)  # a route: what they're asked to do
+    for_: dict[str, float] = field(default_factory=dict)  # ...and who what they bring is for
     feel: dict[str, float] = field(default_factory=dict)  # a route: how the listeners take it
     mood: dict[str, float] = field(default_factory=dict)  # a reply read: the speaker's mood
     gesture: dict[str, float] = field(default_factory=dict)  # ...their gesture
@@ -951,6 +1077,12 @@ class Reading:
         """What the user asks whoever they're talking to to do, if Jev is at least `floor` sure."""
         best = top(self.act, floor)
         return None if best in (None, NO_ACT) else best
+
+    def gives_to(self, floor: float) -> str | None:
+        """Who something the user asks to be brought or handed over is for, if it's a character
+        and Jev is at least `floor` sure: otherwise, it's for the user."""
+        best = top(self.for_, floor)
+        return None if best in (None, USER) else best
 
     def does(self, floor: float) -> str | None:
         """What the speaker of a line sets about doing, if Jev is at least `floor` sure."""
@@ -1052,6 +1184,7 @@ class Referee:
             INTENT: intent_question(),
             MOVE: move_question(areas),
             ACT: act_question(),
+            FOR: for_question(cast),
             FEEL: feel_question(),
         }
 
@@ -1087,7 +1220,12 @@ class Referee:
             reading.probabilities = dict(choice.probabilities)
             reading.chorus = chorus.probability
             reading.intent = dict(intent.probabilities)
-            for name, target in ((MOVE, reading.move), (ACT, reading.act), (FEEL, reading.feel)):
+            for name, target in (
+                (MOVE, reading.move),
+                (ACT, reading.act),
+                (FOR, reading.for_),
+                (FEEL, reading.feel),
+            ):
                 result = results.get(name)
                 if isinstance(result, ChoiceResult):
                     target.update(result.probabilities)
@@ -1180,6 +1318,37 @@ class Referee:
             if not task.done():
                 task.cancel()
         self._cache.clear()
+
+
+# The colors of the conservatory's flowers (RoomTypes.cpp), which someone can ask for.
+FLOWER_COLORS = ("red", "yellow", "pink", "white", "purple", "orange")
+
+
+def flower_color(text: str) -> str | None:
+    """The color of flower `text` asks for or promises, if it names one of the conservatory's
+    ("a yellow one, please"), and only one."""
+    said = {c for c in FLOWER_COLORS if re.search(rf"\b{c}\b", text.lower())}
+    return said.pop() if len(said) == 1 else None
+
+
+# Words speech-to-text writes that look like a name but aren't one ("the" for Theo).
+NOT_NAMES = {"the", "then", "they", "them", "there", "may", "you", "your", "yeah"}
+
+
+def mentions(text: str, name: str) -> bool:
+    """Whether `text` says `name`, or something speech-to-text might have made of it ("Junot",
+    "Mya")."""
+    target = name.lower()
+    for word in re.findall(r"[a-z]+", text.lower()):
+        if word == target:
+            return True
+        if (
+            word not in NOT_NAMES
+            and len(word) >= len(target) - 1
+            and SequenceMatcher(None, word, target).ratio() >= 0.8
+        ):
+            return True
+    return False
 
 
 def weigh(reading: Reading, favoured: str | None, weight: float) -> Reading:

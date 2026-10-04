@@ -79,12 +79,13 @@ FRoomStep FRoomStep::BusyWith(ERoomActivity Activity, float Seconds)
 	return Step;
 }
 
-FRoomStep FRoomStep::TakeItem(ERoomItem Item, const FLinearColor& Tint)
+FRoomStep FRoomStep::TakeItem(ERoomItem Item, const FLinearColor& Tint, const FString& Name)
 {
 	FRoomStep Step;
 	Step.Kind = EKind::Take;
 	Step.Item = Item;
 	Step.Tint = Tint;
+	Step.ItemName = Name;
 	return Step;
 }
 
@@ -415,7 +416,7 @@ void ARoomCharacter::UpdateJob(float DeltaSeconds)
 		}
 		break;
 	case FRoomStep::EKind::Take:
-		Hold(ARoomItem::Make(GetWorld(), Step.Item, GetMesh(), Step.Tint));
+		Hold(ARoomItem::Make(GetWorld(), Step.Item, GetMesh(), Step.Tint, Step.ItemName));
 		URoomMusic::PlaySound(GetWorld(), GetActorLocation() + FVector(0.0f, 0.0f, 20.0f), ERoomSound::Pop, 0.5f);
 		NextStep();
 		break;

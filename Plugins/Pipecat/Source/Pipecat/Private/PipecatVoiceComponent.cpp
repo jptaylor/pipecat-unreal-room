@@ -16,6 +16,9 @@
 THIRD_PARTY_INCLUDES_START
 #include <pipecat/pipecat.h>
 #include <pipecat/websocket/transport.h>
+#if PIPECAT_WITH_DAILY
+#include <pipecat/daily/transport.h>
+#endif
 THIRD_PARTY_INCLUDES_END
 
 #include <array>
@@ -74,8 +77,10 @@ public:
 	FPipecatSession(
 		UPipecatVoiceComponent* InOwner,
 		const TArray<USoundWaveProcedural*>& InWaves,
-		const TMap<FString, FPipecatFunctionHandler>& InFunctions)
-		: Owner(InOwner), Waves(InWaves)
+		const TMap<FString, FPipecatFunctionHandler>& InFunctions,
+		EPipecatTransport InTransport,
+		const TArray<FString>& Tracks)
+		: Owner(InOwner), Waves(InWaves), Transport(InTransport)
 	{
 		for (const TPair<FString, FPipecatFunctionHandler>& Function : InFunctions)
 		{
@@ -86,14 +91,39 @@ public:
 			Level = 0.0f;
 		}
 
-		pipecat::WebSocketTransportOptions TransportOptions;
-		TransportOptions.user_audio_sample_rate = UserSampleRate;
-		TransportOptions.user_audio_channels = 1;
-		TransportOptions.bot_audio_sample_rate = BotSampleRate;
-		TransportOptions.bot_audio_channels = static_cast<uint8_t>(FMath::Clamp(Waves.Num(), 1, MaxVoiceChannels));
-
+		const uint8_t Channels = static_cast<uint8_t>(FMath::Clamp(Waves.Num(), 1, MaxVoiceChannels));
 		pipecat::PipecatClientOptions Options;
-		Options.transport = std::make_unique<pipecat::WebSocketTransport>(TransportOptions);
+#if PIPECAT_WITH_DAILY
+		if (Transport == EPipecatTransport::Daily)
+		{
+			// Each voice channel is one of the bot's tracks, if it has several.
+			pipecat::DailyTransportOptions TransportOptions;
+			TransportOptions.user_audio_sample_rate = UserSampleRate;
+			TransportOptions.user_audio_channels = 1;
+			TransportOptions.bot_audio_sample_rate = BotSampleRate;
+			TransportOptions.bot_audio_channels = Channels;
+			for (int32 Index = 0; Index < FMath::Min(Tracks.Num(), static_cast<int32>(Channels)); ++Index)
+			{
+				TransportOptions.bot_audio_tracks.push_back(ToStdString(Tracks[Index]));
+			}
+			Options.transport = std::make_unique<pipecat::DailyTransport>(TransportOptions);
+		}
+#else
+		if (Transport == EPipecatTransport::Daily)
+		{
+			UE_LOG(LogPipecat, Warning, TEXT("This build has no Daily transport: using the WebSocket"));
+			Transport = EPipecatTransport::WebSocket;
+		}
+#endif
+		if (!Options.transport)
+		{
+			pipecat::WebSocketTransportOptions TransportOptions;
+			TransportOptions.user_audio_sample_rate = UserSampleRate;
+			TransportOptions.user_audio_channels = 1;
+			TransportOptions.bot_audio_sample_rate = BotSampleRate;
+			TransportOptions.bot_audio_channels = Channels;
+			Options.transport = std::make_unique<pipecat::WebSocketTransport>(TransportOptions);
+		}
 		Options.callbacks = this;
 		Client = std::make_unique<pipecat::PipecatClient>(std::move(Options));
 
@@ -107,15 +137,44 @@ public:
 	}
 
 	// Captures the microphone, and sends it to the bot whenever it's
-	// connected.
-	void StartMicrophone()
+	// connected: as it is, or gated, `GateDelay` seconds late.
+	void StartMicrophone(bool bGate, float GateDelay)
 	{
-		Microphone.Start(UserSampleRate, [this](const int16* Frames, int32 NumFrames) {
-			if (Running)
+		if (bGate)
+		{
+			Delay.Init(0, FMath::Max(FMath::RoundToInt(GateDelay * UserSampleRate), 1));
+			DelayAt = 0;
+		}
+		Microphone.Start(UserSampleRate, [this, bGate](const int16* Frames, int32 NumFrames) {
+			if (!Running)
+			{
+				return;
+			}
+			if (!bGate)
 			{
 				Client->send_user_audio(Frames, NumFrames);
+				return;
 			}
+			// A moment late, and faded in and out (over 5 ms) as the player
+			// starts and stops speaking. Only this thread touches the delay.
+			const float Target = MicrophoneOpen ? 1.0f : 0.0f;
+			const float Step = 1.0f / (0.005f * UserSampleRate);
+			Gated.SetNumUninitialized(NumFrames, EAllowShrinking::No);
+			for (int32 i = 0; i < NumFrames; ++i)
+			{
+				const int16 Late = Delay[DelayAt];
+				Delay[DelayAt] = Frames[i];
+				DelayAt = (DelayAt + 1) % Delay.Num();
+				Gain += FMath::Clamp(Target - Gain, -Step, Step);
+				Gated[i] = static_cast<int16>(Late * Gain);
+			}
+			Client->send_user_audio(Gated.GetData(), NumFrames);
 		});
+	}
+
+	void SetMicrophoneOpen(bool bOpen)
+	{
+		MicrophoneOpen = bOpen;
 	}
 
 	void Start(const FString& StartUrl, const FString& ApiKey)
@@ -127,7 +186,16 @@ public:
 
 		pipecat::APIRequest Request;
 		Request.endpoint = ToStdString(StartUrl);
-		Request.request_data = {{"transport", "websocket"}};
+		// The start endpoint creates a Daily room for the bot and the game to
+		// meet in, or gives the bot's WebSocket.
+		if (Transport == EPipecatTransport::Daily)
+		{
+			Request.request_data = {{"createDailyRoom", true}};
+		}
+		else
+		{
+			Request.request_data = {{"transport", "websocket"}};
+		}
 		if (!ApiKey.IsEmpty())
 		{
 			Request.headers["Authorization"] = "Bearer " + ToStdString(ApiKey);
@@ -389,11 +457,19 @@ private:
 	TWeakObjectPtr<UPipecatVoiceComponent> Owner;
 	// Kept alive by the component, which stops the session first.
 	TArray<USoundWaveProcedural*> Waves;
+	EPipecatTransport Transport;
 	std::unique_ptr<pipecat::PipecatClient> Client;
 	FPipecatMicrophone Microphone;
 
 	std::atomic<bool> Running {false};
 	std::atomic<bool> Ready {false};
+	// The gated microphone: whether it's open (set on the game thread), and,
+	// on the capture thread, the delay, and how open it is.
+	std::atomic<bool> MicrophoneOpen {false};
+	TArray<int16> Delay;
+	int32 DelayAt = 0;
+	float Gain = 0.0f;
+	TArray<int16> Gated;
 	std::array<std::atomic<float>, MaxVoiceChannels> Levels;
 	std::thread ConnectThread;
 	std::thread Reader;
@@ -450,7 +526,7 @@ void UPipecatVoiceComponent::BeginPlay()
 			Attenuation.bEnableOcclusion = true;
 			Attenuation.OcclusionTraceChannel = ECC_Visibility;
 			Attenuation.OcclusionLowPassFilterFrequency = 1800.0f;
-			Attenuation.OcclusionVolumeAttenuation = 0.45f;
+			Attenuation.OcclusionVolumeAttenuation = VoiceOcclusionVolume;
 			Attenuation.OcclusionInterpolationTime = 0.4f;
 		}
 		Audio->SetSound(Wave);
@@ -460,10 +536,10 @@ void UPipecatVoiceComponent::BeginPlay()
 		VoiceAudio.Add(Audio);
 	}
 
-	Session = MakeShared<FPipecatSession>(this, ObjectPtrDecay(VoiceWaves), Functions);
+	Session = MakeShared<FPipecatSession>(this, ObjectPtrDecay(VoiceWaves), Functions, Transport, VoiceTracks);
 	if (bUseMicrophone)
 	{
-		Session->StartMicrophone();
+		Session->StartMicrophone(bGateMicrophone, MicrophoneGateDelay);
 	}
 
 	if (bConnectOnBeginPlay)
@@ -516,10 +592,10 @@ void UPipecatVoiceComponent::Connect()
 			bConnectOnBeginPlay = true;
 			return;
 		}
-		Session = MakeShared<FPipecatSession>(this, ObjectPtrDecay(VoiceWaves), Functions);
+		Session = MakeShared<FPipecatSession>(this, ObjectPtrDecay(VoiceWaves), Functions, Transport, VoiceTracks);
 		if (bUseMicrophone)
 		{
-			Session->StartMicrophone();
+			Session->StartMicrophone(bGateMicrophone, MicrophoneGateDelay);
 		}
 	}
 	Session->Start(StartUrl, ApiKey);
@@ -573,6 +649,14 @@ float UPipecatVoiceComponent::GetBotVoiceChannelLevel(int32 Channel) const
 float UPipecatVoiceComponent::GetMicrophoneLevel() const
 {
 	return Session ? Session->GetMicrophoneLevel() : 0.0f;
+}
+
+void UPipecatVoiceComponent::SetMicrophoneOpen(bool bOpen)
+{
+	if (Session)
+	{
+		Session->SetMicrophoneOpen(bOpen);
+	}
 }
 
 float UPipecatVoiceComponent::GetMicrophoneRms() const

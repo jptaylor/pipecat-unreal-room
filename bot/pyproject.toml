@@ -5,6 +5,9 @@ description = "Three characters in a house in an Unreal Engine game: Jev reads t
 requires-python = ">=3.12"
 dependencies = [
     "pipecat-ai[cartesia,deepgram,jev,openai,runner,silero,websocket]==1.12.0",
+    # The Daily transport (-t daily): daily-python is for Linux and macOS only, so on Windows the
+    # bot runs over the WebSocket, or in WSL.
+    "pipecat-ai[daily]==1.12.0; sys_platform != 'win32'",
     "python-dotenv>=1.1,<2",
 ]
 

@@ -21,6 +21,7 @@ from room import (
     USER,
     Reading,
     Transcript,
+    mentions,
 )
 from space import Space
 
@@ -43,9 +44,9 @@ def route(choice: str, **fields: Any) -> Reading:
     return reading
 
 
-def engine_with(heard: set[str]) -> Engine:
+def engine_with(heard: set[str], said: str = "Hello?") -> Engine:
     t = Transcript(CAST)
-    t.add(USER, "Hello?", heard_by=frozenset(heard))
+    t.add(USER, said, heard_by=frozenset(heard))
     return Engine(t)
 
 
@@ -78,10 +79,48 @@ def test_the_game_says_who_hears_whom() -> None:
     assert space.listeners(THEO) == {USER, JUNO}
     assert space.near_user() == {THEO, JUNO}
     assert space.situation(THEO) == (
+        "You're in the kitchen, with Juno. The person is here with you, close enough to talk to. "
+        "You haven't met the person before."
+    )
+    space.talked_with(THEO)
+    assert space.situation(THEO) == (
         "You're in the kitchen, with Juno. The person is here with you, close enough to talk to."
     )
     assert "following the person" in space.situation(JUNO)
     assert "isn't close enough" in space.situation(MAYA)
+
+
+def test_only_those_the_user_has_met_speak_up_unasked() -> None:
+    space = Space(CAST)
+    space.world(AREAS)
+    space.update(
+        {
+            "user": {"area": "kitchen"},
+            "characters": {
+                MAYA: {"area": "kitchen", "hears": [USER, THEO]},
+                THEO: {"area": "kitchen", "hears": [USER, MAYA]},
+                JUNO: {"area": "hall", "hears": []},
+            },
+        }
+    )
+    assert space.friends_near_user() == set()
+    assert space.talked_with(MAYA) and not space.talked_with(MAYA)  # new only the first time
+    assert space.friends_near_user() == {MAYA}
+    # Jev knows whom the user knows, and whom they've yet to meet.
+    state = space.for_jev()
+    assert state["user_has_talked_with"] == ["Maya"]
+    assert state["user_has_not_met"] == ["Theo", "Juno"]
+
+
+async def test_coming_up_to_someone_isnt_a_cue_to_speak(director: Director, monkeypatch) -> None:
+    played: list[Plan] = []
+
+    async def play(plan: Plan, *args: Any, **kwargs: Any) -> None:
+        played.append(plan)
+
+    monkeypatch.setattr(director, "play", play)
+    await director.met(THEO)
+    assert played == []
 
 
 def test_a_character_is_shown_only_what_they_heard() -> None:
@@ -102,9 +141,25 @@ def test_nobody_answers_what_nobody_heard() -> None:
 
 
 def test_someone_too_far_away_is_told_about_by_whoever_heard() -> None:
-    plan = engine_with({THEO}).route(route(MAYA))
+    plan = engine_with({THEO}, "Maya, are you there?").route(route(MAYA))
     assert plan.why == "not_heard" and [t.speaker for t in plan.takes] == [THEO]
     assert plan.takes[0].note and "Maya, who is too far away to hear it" in plan.takes[0].note
+    # Speech-to-text's take on the name still names her.
+    assert engine_with({THEO}, "Mya, are you there?").route(route(MAYA)).why == "not_heard"
+
+
+def test_whoever_the_user_walked_away_from_isnt_who_theyre_talking_to() -> None:
+    """Jev picks Maya, whom the user spoke to last, but she's out of earshot and wasn't named:
+    the user is talking to whoever is with them now."""
+    plan = engine_with({THEO}, "What are you cooking?").route(route(MAYA))
+    assert plan.why == "addressed" and [t.speaker for t in plan.takes] == [THEO]
+
+
+def test_a_name_is_a_name_and_the_is_not_theo() -> None:
+    assert mentions("Juno, play us something", "Juno")
+    assert mentions("junot can you hear me", "Juno")
+    assert not mentions("what's the plan?", "Theo")
+    assert not mentions("may I have some cake?", "Maya")
 
 
 def test_a_group_is_those_of_it_who_heard() -> None:
@@ -182,6 +237,19 @@ def test_a_character_can_be_sent_somewhere_or_home(director: Director) -> None:
         "area": None,
     }
     assert home.takes[0].note == "As you answer, you head back to the conservatory."
+
+
+def test_everyone_asked_to_follow_follows_even_if_only_one_answers(director: Director) -> None:
+    plan = Plan([Take(THEO, "addressed", None, USER)], why="addressed", addressed=[THEO])
+    reading = route(THEO, move={"follow": 0.9}, included={THEO: 0.9, MAYA: 0.85, JUNO: 0.1})
+    move = director._with_move(plan, reading)
+    assert move is not None and move["who"] == [MAYA, THEO]
+
+
+def test_whoever_the_user_walked_away_from_isnt_favoured(director: Director) -> None:
+    director.engine.favoured = MAYA
+    assert director._favoured({MAYA, THEO}) == MAYA
+    assert director._favoured({THEO}) is None
 
 
 def test_nobody_moves_on_a_turn_they_didnt_hear(director: Director) -> None:

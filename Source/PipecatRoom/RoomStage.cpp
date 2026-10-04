@@ -10,6 +10,7 @@
 #include "RoomCharacter.h"
 #include "RoomHouse.h"
 #include "RoomItem.h"
+#include "RoomThings.h"
 #include "RoomVoiceRing.h"
 #include "SRoomCaptions.h"
 
@@ -43,6 +44,8 @@ const float SilenceUnder = 7.0f;
 const float OnsetSeconds = 0.09f;
 const float HangoverSeconds = 0.35f;
 const float OverVoices = 6.0f;
+// And this much louder, at most, with music playing close by.
+const float OverMusic = 10.0f;
 // A new utterance, after this long quiet: who heard it starts again.
 const float NewUtteranceAfter = 1.5f;
 // Every 6 dB louder, a voice carries twice as far.
@@ -53,6 +56,11 @@ const float SpeakingMoodSeconds = 6.0f;
 const float ListeningMoodSeconds = 4.0f;
 // How long someone's caption stays once they've stopped, in seconds.
 const float CaptionHold = 3.0f;
+// How fast a caption is shown as its line is said, in characters a second
+// (about how fast the voices speak), and how loud their voice's channel is when
+// they're heard saying it.
+const float CaptionCharsPerSecond = 15.0f;
+const float CaptionVoiceLevel = 0.03f;
 
 FString ToJson(const TSharedRef<FJsonObject>& Object)
 {
@@ -305,12 +313,23 @@ void ARoomStage::ConnectVoice()
 		Voice->StartUrl = StartUrl;
 	}
 	Voice->ApiKey = ApiKey;
+	// Over Daily, each character's voice is a track of the bot's, named after
+	// them; over a WebSocket, a channel of its one stream.
+	FString Via = Transport;
+	FParse::Value(FCommandLine::Get(), TEXT("PipecatTransport="), Via);
+	Voice->Transport = Via.Equals(TEXT("websocket"), ESearchCase::IgnoreCase) ? EPipecatTransport::WebSocket : EPipecatTransport::Daily;
+	for (const ARoomCharacter* Character : Characters)
+	{
+		Voice->VoiceTracks.Add(Character->GetId());
+	}
 	Voice->bUseMicrophone = bUseMicrophone;
+	Voice->bGateMicrophone = bGateMicrophone;
 	Voice->VoiceVolume = VoiceVolume;
 	Voice->VoiceChannels = FMath::Max(Characters.Num(), 1);
-	Voice->VoiceInnerRadius = 200.0f;
-	Voice->VoiceFalloffDistance = 2400.0f;
+	Voice->VoiceInnerRadius = VoiceFullWithin;
+	Voice->VoiceFalloffDistance = VoiceFadesOver;
 	Voice->bVoiceOcclusion = true;
+	Voice->VoiceOcclusionVolume = VoiceThroughWalls;
 	Voice->OnServerMessage.AddDynamic(this, &ARoomStage::HandleServerMessage);
 	Voice->OnUserTranscript.AddDynamic(this, &ARoomStage::HandleUserTranscript);
 	Voice->OnBotReady.AddDynamic(this, &ARoomStage::HandleBotReady);
@@ -425,8 +444,16 @@ void ARoomStage::UpdateSpeech(float DeltaSeconds)
 	Floor = FMath::Clamp(Floor, -90.0f, -38.0f);
 
 	const bool bWasSpeaking = bSpeaking;
-	const float Start = FMath::Max(Floor + SpeechOver, SpeechMinDb) + (Speaking.IsEmpty() ? 0.0f : OverVoices);
-	const float Stop = FMath::Max(Floor + SilenceUnder, SpeechMinDb - 6.0f);
+	// Music close by, as much as the player hears it, which the microphone may
+	// pick up too.
+	float Music = 0.0f;
+	if (const APawn* Listener = UGameplayStatics::GetPlayerPawn(this, 0); Listener && Things && Things->GetMusicArea() != NAME_None)
+	{
+		Things->GetBeatAt(Listener->GetActorLocation(), Music);
+	}
+	const float Start =
+		FMath::Max(Floor + SpeechOver, SpeechMinDb) + (Speaking.IsEmpty() ? 0.0f : OverVoices) + OverMusic * Music;
+	const float Stop = FMath::Max(Floor + SilenceUnder, SpeechMinDb - 6.0f) + 0.7f * OverMusic * Music;
 	Onset = Level > Start ? Onset + DeltaSeconds : 0.0f;
 	if (Level > Start && (bSpeaking || Onset >= OnsetSeconds || PretendLeft > 0.0f))
 	{
@@ -448,6 +475,10 @@ void ARoomStage::UpdateSpeech(float DeltaSeconds)
 		LastEarshot.Reset();
 	}
 	Quiet = bSpeaking ? 0.0f : Quiet + DeltaSeconds;
+	if (Voice)
+	{
+		Voice->SetMicrophoneOpen(bSpeaking);
+	}
 
 	// How far it carries: twice as far for every 6 dB louder than usual.
 	Peak = FMath::Max(Level, Peak - 18.0f * DeltaSeconds);
@@ -511,6 +542,10 @@ void ARoomStage::UpdateCharacters(float DeltaSeconds)
 		ARoomCharacter* Character = Characters[Index];
 		const float ChannelLevel = Voice ? Voice->GetBotVoiceChannelLevel(Index) : 0.0f;
 		Character->SetVoiceLevel(ChannelLevel);
+		if (FSaying* Saying = Sayings.Find(Character->GetId()))
+		{
+			UpdateSaying(Character, *Saying, ChannelLevel, DeltaSeconds);
+		}
 		// Whose voice is playing, now and then, to tell the voices went where they should.
 		const double Now = FPlatformTime::Seconds();
 		double& Logged = LoggedVoice.FindOrAdd(Character->GetId());
@@ -599,7 +634,7 @@ void ARoomStage::UpdateSpace(float DeltaSeconds)
 			Doing = TEXT("dancing");
 		}
 		One->SetStringField(TEXT("doing"), Doing);
-		One->SetStringField(TEXT("holding"), Character->GetHeld() ? RoomTypes::ItemName(Character->GetHeldKind()) : TEXT(""));
+		One->SetStringField(TEXT("holding"), Character->GetHeld() ? Character->GetHeld()->GetName() : FString());
 		Everyone->SetObjectField(Character->GetId(), One);
 
 		// Coming up to someone for the first time, they greet the player.
@@ -622,7 +657,7 @@ void ARoomStage::UpdateSpace(float DeltaSeconds)
 		World->SetStringField(TEXT("music"), TEXT(""));
 	}
 	World->SetBoolField(TEXT("cake"), Things && Things->HasCake());
-	World->SetStringField(TEXT("holding"), PlayerItem ? RoomTypes::ItemName(PlayerItem->GetKind()) : TEXT(""));
+	World->SetStringField(TEXT("holding"), PlayerItem ? PlayerItem->GetName() : FString());
 	Data->SetObjectField(TEXT("world"), World);
 	const FString Json = ToJson(Data);
 	if (Json != LastSpace)
@@ -774,6 +809,60 @@ AActor* ARoomStage::Resolve(const FString& Id) const
 	return FindCharacter(Id);
 }
 
+void ARoomStage::UpdateSaying(ARoomCharacter* Character, FSaying& Saying, float ChannelLevel, float DeltaSeconds)
+{
+	if (!Captions)
+	{
+		return;
+	}
+	// Nothing's shown until their voice is heard; then the words as they're
+	// said, carrying on through the gaps between them, and all of it once
+	// their voice has finished.
+	const bool bVoice = ChannelLevel > CaptionVoiceLevel;
+	Saying.SinceVoice = bVoice ? 0.0f : Saying.SinceVoice + DeltaSeconds;
+	Saying.bHeard |= bVoice;
+	if (!Saying.bHeard)
+	{
+		return;
+	}
+	if (Saying.bEnding && Saying.SinceVoice > 0.25f)
+	{
+		Saying.bWhole = true;
+	}
+	if (!Saying.bWhole && Saying.SinceVoice < 0.5f)
+	{
+		Saying.Said += DeltaSeconds * CaptionCharsPerSecond;
+	}
+	const FString& Text = Saying.Text;
+	int32 Shown = Text.Len();
+	if (!Saying.bWhole && Saying.Said < Text.Len())
+	{
+		// Whole words: up to the end of the last one said.
+		Shown = FMath::Max(Text.Find(TEXT(" "), ESearchCase::CaseSensitive, ESearchDir::FromStart, FMath::FloorToInt(Saying.Said)), 0);
+		if (Shown == 0)
+		{
+			Shown = Text.Len();
+		}
+	}
+	const bool bDone = Saying.bWhole;
+	if (Shown != Saying.Shown || Saying.Clarity < 0.0f)
+	{
+		Saying.Shown = Shown;
+		Saying.Clarity = Clarity(Character);
+		const FString Said = Text.Left(Shown);
+		if (Saying.Clarity > 0.3f)
+		{
+			Learn(Said);
+		}
+		Captions->SetLine(Character->GetId(), Label(Character), Character->GetCast().Color, Said, Saying.Clarity);
+	}
+	if (bDone)
+	{
+		Captions->FadeOut(Character->GetId(), CaptionHold);
+		Sayings.Remove(Character->GetId());
+	}
+}
+
 float ARoomStage::Clarity(const ARoomCharacter* Character) const
 {
 	// Faint, and then gone, as they get further away, sooner through walls.
@@ -844,6 +933,10 @@ void ARoomStage::HandleMessage(const FString& Message)
 		}
 		if (bRemoved)
 		{
+			if (const FSaying* Saying = Sayings.Find(Speaker); Saying && Saying->Id == Id)
+			{
+				Sayings.Remove(Speaker);
+			}
 			Captions->FadeOut(Speaker, 0.3f);
 			return;
 		}
@@ -854,18 +947,19 @@ void ARoomStage::HandleMessage(const FString& Message)
 			Captions->FadeOut(TEXT("user"), 4.0f);
 			return;
 		}
-		if (ARoomCharacter* Character = FindCharacter(Speaker))
+		if (FindCharacter(Speaker))
 		{
-			const float Clear = Clarity(Character);
-			if (Clear > 0.3f)
+			// Shown as it's said: from when their voice is heard, a word at a
+			// time (UpdateSayings). The same line again is it cut short, or
+			// all written: what's been said of it stays shown.
+			FSaying& Saying = Sayings.FindOrAdd(Speaker);
+			if (Saying.Id != Id)
 			{
-				Learn(Text);
+				Saying = FSaying();
+				Saying.Id = Id;
 			}
-			Captions->SetLine(Speaker, Label(Character), Character->GetCast().Color, Text, Clear);
-			if (!Speaking.Contains(Speaker))
-			{
-				Captions->FadeOut(Speaker, CaptionHold + 3.0f);
-			}
+			Saying.Text = Text;
+			Saying.bWhole = false;
 		}
 	}
 	else if (Type == TEXT("voices"))
@@ -876,7 +970,15 @@ void ARoomStage::HandleMessage(const FString& Message)
 		{
 			if (!Now.Contains(Was) && Captions)
 			{
-				Captions->FadeOut(Was, CaptionHold);
+				// The rest of their line shows once their voice has finished.
+				if (FSaying* Saying = Sayings.Find(Was))
+				{
+					Saying->bEnding = true;
+				}
+				else
+				{
+					Captions->FadeOut(Was, CaptionHold);
+				}
 			}
 			if (!Now.Contains(Was))
 			{
@@ -953,13 +1055,18 @@ void ARoomStage::HandleMessage(const FString& Message)
 	}
 	else if (Type == TEXT("act"))
 	{
-		FString What;
+		// What they're to do, and who for, if it's something for someone else
+		// than the player, e.g. bringing Maya some cake.
+		FString What, For, Color;
 		Json->TryGetStringField(TEXT("action"), What);
+		Json->TryGetStringField(TEXT("to"), For);
+		Json->TryGetStringField(TEXT("color"), Color);
+		ARoomCharacter* Recipient = For.IsEmpty() ? nullptr : FindCharacter(For);
 		for (const FString& Id : StringList(Json, TEXT("who")))
 		{
 			if (ARoomCharacter* Character = FindCharacter(Id))
 			{
-				Act(Character, What);
+				Act(Character, What, Recipient != Character ? Recipient : nullptr, Color);
 			}
 		}
 	}

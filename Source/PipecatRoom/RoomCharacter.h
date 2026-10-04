@@ -54,13 +54,14 @@ struct FRoomStep
 	float Seconds = 0.0f;
 	ERoomItem Item = ERoomItem::None;
 	FLinearColor Tint = FLinearColor::Red;
+	FString ItemName;
 	TWeakObjectPtr<AActor> To;
 	ERoomGesture Gesture = ERoomGesture::None;
 	TFunction<void()> Then;
 
 	static FRoomStep WalkTo(const FVector& Where, float Yaw);
 	static FRoomStep BusyWith(ERoomActivity Activity, float Seconds);
-	static FRoomStep TakeItem(ERoomItem Item, const FLinearColor& Tint = FLinearColor::Red);
+	static FRoomStep TakeItem(ERoomItem Item, const FLinearColor& Tint = FLinearColor::Red, const FString& Name = FString());
 	static FRoomStep GiveTo(AActor* To);
 	static FRoomStep Make(ERoomGesture Gesture);
 	static FRoomStep Call(TFunction<void()> Then);

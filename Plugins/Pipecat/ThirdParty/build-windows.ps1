@@ -1,10 +1,12 @@
 #
 # Copyright (c) 2026, Daily
 #
-# Builds the Pipecat C++ client and its WebSocket transport with Visual
-# Studio's compiler, which Unreal Engine uses on Windows, and installs them in
-# ThirdParty\Win64 for the Pipecat plugin, with nlohmann/json's headers. They
-# use Unreal's libcurl and OpenSSL, and download and build what else they need.
+# Builds the Pipecat C++ client and its Daily and WebSocket transports with
+# Visual Studio's compiler, which Unreal Engine uses on Windows, and installs
+# them in ThirdParty\Win64 for the Pipecat plugin, with nlohmann/json's
+# headers and Daily's Core SDK (its DLL, in bin). They use Unreal's libcurl and
+# OpenSSL, and download and build what else they need. The Daily Core SDK is
+# downloaded from Daily's releases on GitHub into ThirdParty\daily, once.
 #
 # Usage:
 #   $env:UE_ROOT = "C:\path\to\UnrealEngine"
@@ -20,6 +22,11 @@ if (-not $env:PIPECAT_CLIENT_CXX) { throw "Set PIPECAT_CLIENT_CXX to the pipecat
 $Here = $PSScriptRoot
 $Build = Join-Path $Here "build\Win64"
 $Prefix = Join-Path $Here "Win64"
+
+# The Daily Core SDK the Daily transport is built with.
+$DailyCoreVersion = "0.23.0"
+$DailyCoreName = "daily-core-sdk-$DailyCoreVersion-windows-x86_64"
+$DailyCore = Join-Path $Here "daily\$DailyCoreName"
 
 # Runs a program, and stops if it fails.
 function Invoke-Program {
@@ -73,14 +80,25 @@ $OpenSslHeader = Get-ChildItem (Join-Path $OpenSsl.Version "include\Win64") -Rec
 if (-not $OpenSslHeader) { throw "Unable to find OpenSSL's headers in $($OpenSsl.Version)" }
 $OpenSslInclude = $OpenSslHeader.Directory.Parent.FullName
 
+if (-not (Test-Path (Join-Path $DailyCore "include\daily_core.h"))) {
+    Write-Host "*** Downloading the Daily Core SDK $DailyCoreVersion ***"
+    $Zip = Join-Path $Here "daily\$DailyCoreName.zip"
+    New-Item -ItemType Directory -Force (Split-Path $Zip) | Out-Null
+    Invoke-WebRequest -UseBasicParsing -OutFile $Zip `
+        "https://github.com/daily-co/daily-core-sdk/releases/download/v$DailyCoreVersion/$DailyCoreName.zip"
+    Expand-Archive -Force $Zip (Split-Path $Zip)
+}
+
 if (Test-Path $Prefix) { Remove-Item -Recurse -Force $Prefix }
 
-Write-Host "*** Building the Pipecat C++ client and its WebSocket transport ***"
+Write-Host "*** Building the Pipecat C++ client and its Daily and WebSocket transports ***"
 # Unreal always links the release C runtime, as a DLL, which is CMake's default
 # for a release build. Its libcurl is a static library.
 Invoke-Program cmake -S $env:PIPECAT_CLIENT_CXX -B "$Build\pipecat" -G Ninja `
     "-DCMAKE_BUILD_TYPE=Release" `
     "-DPIPECAT_BUILD_WEBSOCKET=ON" `
+    "-DPIPECAT_BUILD_DAILY=ON" `
+    "-DDailyCore_ROOT=$(ConvertTo-CMakePath $DailyCore)" `
     "-DPIPECAT_BUILD_TESTS=OFF" `
     "-DCURL_NO_CURL_CMAKE=ON" `
     "-DCURL_USE_STATIC_LIBS=ON" `
@@ -97,6 +115,12 @@ Invoke-Program cmake --install "$Build\pipecat" --prefix $Prefix
 if (-not (Test-Path "$Prefix\include\nlohmann")) {
     Copy-Item -Recurse "$Build\pipecat\_deps\nlohmann_json-src\include\nlohmann" "$Prefix\include"
 }
+
+# Daily's Core SDK: its import library, linked with the plugin, and its DLL,
+# which goes next to the plugin's.
+New-Item -ItemType Directory -Force "$Prefix\bin" | Out-Null
+Copy-Item (Join-Path $DailyCore "lib\daily_core.dll.lib") "$Prefix\lib"
+Copy-Item (Join-Path $DailyCore "bin\daily_core.dll") "$Prefix\bin"
 
 Write-Host "*** Installed in $Prefix ***"
 Get-ChildItem "$Prefix\lib" -Filter "*.lib" | ForEach-Object { $_.Name }

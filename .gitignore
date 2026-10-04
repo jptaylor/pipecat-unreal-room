@@ -16,6 +16,8 @@ Plugins/*/Intermediate/
 Plugins/Pipecat/ThirdParty/build/
 Plugins/Pipecat/ThirdParty/Linux/
 Plugins/Pipecat/ThirdParty/Win64/
+# Daily's Core SDK, downloaded by build-windows.ps1.
+Plugins/Pipecat/ThirdParty/daily/
 
 # NVIDIA's DLSS plugins, from NVIDIA's DLSS download (see the README).
 Plugins/DLSS/
@@ -35,3 +37,4 @@ bot/__pycache__/
 bot/**/__pycache__/
 bot/.pytest_cache/
 bot/.ruff_cache/
+bot/logs/

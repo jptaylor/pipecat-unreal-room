@@ -22,10 +22,11 @@ public class Pipecat : ModuleRules
 			"Engine",
 		});
 
-		// The Pipecat C++ client and its WebSocket transport, with the libraries
-		// they need, built in ThirdParty/<platform>, e.g. ThirdParty/Linux, by
-		// ThirdParty/build-linux.sh with Unreal's toolchain, or by
-		// ThirdParty/build-windows.ps1 with Visual Studio's.
+		// The Pipecat C++ client and its transports, with the libraries they
+		// need, built in ThirdParty/<platform>, e.g. ThirdParty/Linux, by
+		// ThirdParty/build-linux.sh with Unreal's toolchain (the WebSocket
+		// transport), or by ThirdParty/build-windows.ps1 with Visual Studio's
+		// (the Daily and WebSocket transports).
 		string ThirdParty = Path.Combine(PluginDirectory, "ThirdParty", Target.Platform.ToString());
 		PublicSystemIncludePaths.Add(Path.Combine(ThirdParty, "include"));
 		string Libraries = Target.Platform == UnrealTargetPlatform.Win64 ? "*.lib" : "*.a";
@@ -42,6 +43,23 @@ public class Pipecat : ModuleRules
 		{
 			// What the WebSocket transport's libraries need from Windows.
 			PublicSystemLibraries.AddRange(new string[] { "ws2_32.lib", "iphlpapi.lib", "bcrypt.lib" });
+
+			// The Daily transport, with Daily's Core SDK, a DLL next to the
+			// plugin's.
+			string DailyCore = Path.Combine(ThirdParty, "bin", "daily_core.dll");
+			if (File.Exists(DailyCore))
+			{
+				PublicDefinitions.Add("PIPECAT_WITH_DAILY=1");
+				RuntimeDependencies.Add("$(BinaryOutputDir)/daily_core.dll", DailyCore);
+			}
+			else
+			{
+				PublicDefinitions.Add("PIPECAT_WITH_DAILY=0");
+			}
+		}
+		else
+		{
+			PublicDefinitions.Add("PIPECAT_WITH_DAILY=0");
 		}
 
 		// The microphone: SDL captures it on Linux (PipecatMicrophoneSDL.cpp),

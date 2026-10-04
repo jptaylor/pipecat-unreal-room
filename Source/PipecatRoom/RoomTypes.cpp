@@ -119,6 +119,19 @@ const TCHAR* RoomTypes::ItemName(ERoomItem Item)
 	return TEXT("nothing");
 }
 
+TConstArrayView<RoomTypes::FRoomBloom> RoomTypes::Blooms()
+{
+	static const FRoomBloom All[] = {
+		{FLinearColor(FColor(226, 64, 80)), TEXT("a red flower")},
+		{FLinearColor(FColor(246, 196, 64)), TEXT("a yellow flower")},
+		{FLinearColor(FColor(240, 140, 180)), TEXT("a pink flower")},
+		{FLinearColor(FColor(250, 246, 240)), TEXT("a white flower")},
+		{FLinearColor(FColor(150, 110, 210)), TEXT("a purple flower")},
+		{FLinearColor(FColor(250, 130, 70)), TEXT("an orange flower")},
+	};
+	return All;
+}
+
 bool RoomTypes::IsFood(ERoomItem Item)
 {
 	return Item == ERoomItem::Cake || Item == ERoomItem::Tomato;

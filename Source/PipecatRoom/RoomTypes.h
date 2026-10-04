@@ -82,6 +82,16 @@ float GestureSeconds(ERoomGesture Gesture);
 // What an item is called, e.g. "a slice of cake", and whether it's food.
 const TCHAR* ItemName(ERoomItem Item);
 bool IsFood(ERoomItem Item);
+// A flower that grows in the conservatory: its color, and what it's called,
+// e.g. "a pink flower".
+struct FRoomBloom
+{
+	FLinearColor Color;
+	const TCHAR* Name;
+};
+
+/** The conservatory's flowers. */
+TConstArrayView<FRoomBloom> Blooms();
 } // namespace RoomTypes
 
 // One of the characters in the house, as bot/characters.json has them.

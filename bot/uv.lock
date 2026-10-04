@@ -2,9 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
-    "python_full_version >= '3.14'",
-    "python_full_version == '3.13.*'",
-    "python_full_version < '3.13'",
+    "python_full_version >= '3.14' and sys_platform != 'win32'",
+    "python_full_version >= '3.14' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform != 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
 ]
 
 [[package]]
@@ -353,6 +356,17 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
+]
+
+[[package]]
+name = "daily-python"
+version = "0.33.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/cb/22165e19418d6ace0474e4a0a54f169de173cb1748112d494fcd924c742b/daily_python-0.33.0-cp38-abi3-macosx_13_0_arm64.whl", hash = "sha256:324bd8c2a7202994a222a9f9460f1a6e0712efe5ab0e16b478c442bc3dd48ea8", size = 11910620, upload-time = "2026-09-25T21:10:38.586Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/34/57df138f62b94439310b35ce9156e2c7159b3eb25858530a722d1ad09bc8/daily_python-0.33.0-cp38-abi3-macosx_13_0_x86_64.whl", hash = "sha256:6eeb93642069082a086c264404dcb81832dd71c386dcf99b55af749389b0ddc8", size = 13236726, upload-time = "2026-09-25T21:10:41.145Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/f4/15b2568816eba688ac11a6c2d785d419fd7274b01d9e59fa10d5c1b54d8a/daily_python-0.33.0-cp38-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:33d3ab7414f4b929ab472c58b1e2f30b3d254a89a764c92404ed1b6e139fd793", size = 14299286, upload-time = "2026-09-25T21:10:43.689Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/4b/b4d9261e4d2859046d4d2c8b5045ddf8567d2ab67c0a544af7f78efb3b9f/daily_python-0.33.0-cp38-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:36e8a2e0a580fd6583c950e64822722693353c7831a58afa3a6e0ee476b74d7c", size = 15057464, upload-time = "2026-09-25T21:10:46.326Z" },
 ]
 
 [[package]]
@@ -1758,6 +1772,9 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+daily = [
+    { name = "daily-python" },
+]
 deepgram = [
     { name = "deepgram-sdk" },
 ]
@@ -1791,6 +1808,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "pipecat-ai", extra = ["deepgram", "jev", "runner", "websocket"] },
+    { name = "pipecat-ai", extra = ["daily"], marker = "sys_platform != 'win32'" },
     { name = "python-dotenv" },
 ]
 
@@ -1805,6 +1823,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pipecat-ai", extras = ["cartesia", "deepgram", "jev", "openai", "runner", "silero", "websocket"], specifier = "==1.12.0" },
+    { name = "pipecat-ai", extras = ["daily"], marker = "sys_platform != 'win32'", specifier = "==1.12.0" },
     { name = "python-dotenv", specifier = ">=1.1,<2" },
 ]
 

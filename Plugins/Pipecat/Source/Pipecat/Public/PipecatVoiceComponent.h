@@ -15,6 +15,16 @@ class UAudioComponent;
 class USceneComponent;
 class USoundWaveProcedural;
 
+/** How the game talks to the bot. */
+UENUM(BlueprintType)
+enum class EPipecatTransport : uint8
+{
+	/** Over Daily (WebRTC): the bot's start endpoint creates a Daily room, e.g. `bot.py -t daily`. */
+	Daily,
+	/** Over a WebSocket, e.g. `bot.py -t websocket`. */
+	WebSocket,
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FPipecatEvent);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPipecatTextEvent, const FString&, Text);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FPipecatTranscriptEvent, const FString&, Text, bool, bFinal);
@@ -51,6 +61,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat")
 	FString ApiKey;
 
+	/** How the game talks to the bot. Set it before connecting. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat")
+	EPipecatTransport Transport = EPipecatTransport::Daily;
+
+	/**
+	 * Over Daily, the bot's custom audio tracks its voices come from, in the
+	 * order of the voice channels, e.g. a track per character (a transport
+	 * destination each, in the bot). Empty: its one voice, from its
+	 * microphone. Over a WebSocket, the bot sends its voices as the channels
+	 * of one stream instead. Set it before play begins.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat")
+	TArray<FString> VoiceTracks;
+
 	/** Starts the bot and connects when play begins. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat")
 	bool bConnectOnBeginPlay = true;
@@ -58,6 +82,20 @@ public:
 	/** Sends the microphone to the bot. It's captured from when play begins, connected or not. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat")
 	bool bUseMicrophone = true;
+
+	/**
+	 * Sends the microphone only while the game says the player is speaking
+	 * (SetMicrophoneOpen), and silence otherwise, so that what else it picks
+	 * up (the game's own music and voices, say, without headphones) isn't
+	 * taken for the player. It's sent MicrophoneGateDelay seconds late, so the
+	 * start of what they say, before the game has noticed, isn't lost. Set it
+	 * before play begins.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat")
+	bool bGateMicrophone = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat", meta = (ClampMin = "0", ClampMax = "1"))
+	float MicrophoneGateDelay = 0.2f;
 
 	/** How many voices the bot sends, each on a channel of its own. Set it before play begins. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat", meta = (ClampMin = "1", ClampMax = "8"))
@@ -78,6 +116,10 @@ public:
 	/** Whether a voice is muffled, and quieter, behind something that blocks the view of it, e.g. a wall. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat")
 	bool bVoiceOcclusion = false;
+
+	/** How loud a voice is behind something, from 0 to 1, with occlusion on. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat", meta = (ClampMin = "0", ClampMax = "1"))
+	float VoiceOcclusionVolume = 0.45f;
 
 	/** Starts the bot and connects to it, without waiting. */
 	UFUNCTION(BlueprintCallable, Category = "Pipecat")
@@ -110,6 +152,10 @@ public:
 	/** How loud the microphone is right now, from 0 to 1. */
 	UFUNCTION(BlueprintPure, Category = "Pipecat")
 	float GetMicrophoneLevel() const;
+
+	/** With bGateMicrophone, whether the player is speaking, and so the microphone is sent. */
+	UFUNCTION(BlueprintCallable, Category = "Pipecat")
+	void SetMicrophoneOpen(bool bOpen);
 
 	/** How loud the microphone is right now, as the RMS of its last 10 ms, from 0 to 1 (full scale). */
 	UFUNCTION(BlueprintPure, Category = "Pipecat")

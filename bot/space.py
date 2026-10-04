@@ -44,6 +44,7 @@ class Space:
     user_holding: str = ""  # what the player's holding
     heard: set[str] = field(default_factory=set)  # who heard what the player is saying
     earshot_known: bool = False  # whether the game has said who heard the player yet
+    talked: set[str] = field(default_factory=set)  # the characters the user has talked with
 
     @property
     def ids(self) -> list[str]:
@@ -83,6 +84,14 @@ class Space:
         self.earshot_known = True
         self.heard = {str(h) for h in data.get("heard") or [] if str(h) in self.ids}
 
+    def talked_with(self, character: str) -> bool:
+        """The user and `character` have spoken to each other: they've met. Whether that's
+        new."""
+        if character not in self.ids or character in self.talked:
+            return False
+        self.talked.add(character)
+        return True
+
     # --- Who hears what ----------------------------------------------------------------------------
 
     def heard_user(self) -> set[str]:
@@ -104,6 +113,11 @@ class Space:
             return set(self.ids)
         return {c for c in self.ids if USER in self.hears.get(c, set())}
 
+    def friends_near_user(self) -> set[str]:
+        """Those near the player whom they've talked with: the only ones who'll speak up
+        unasked. Someone the player hasn't met waits to be spoken to."""
+        return self.near_user() & self.talked
+
     def situation(self, me: str) -> str:
         """Where `me` is and who's with them, for their LLM, e.g. "You're in the kitchen, with
         Maya. The person is here with you." Empty until the game says where everyone is."""
@@ -122,6 +136,8 @@ class Space:
                 else f"in {self.area_name(self.user_area)}"
             )
             parts.append(f"The person is {where}, close enough to talk to.")
+            if me not in self.talked:
+                parts.append("You haven't met the person before.")
         else:
             parts.append("The person isn't close enough to hear you.")
         intent = self.intent.get(me, "")
@@ -138,7 +154,7 @@ class Space:
         return " ".join(parts)
 
     def for_jev(self) -> dict[str, Any]:
-        """Where everyone is, for Jev's state."""
+        """Where everyone is, and whom the user has met, for Jev's state."""
         if not self.known:
             return {}
         state: dict[str, Any] = {
@@ -146,7 +162,13 @@ class Space:
                 "the user": self.area_name(self.user_area),
                 **{self.name(c): self.area_name(self.where.get(c, "")) for c in self.ids},
             },
+            "with_the_user": [self.name(c) for c in sorted(self.near_user())] or "nobody",
+            "user_has_talked_with": [self.name(c) for c in self.ids if c in self.talked]
+            or "nobody yet",
         }
+        strangers = [self.name(c) for c in self.ids if c not in self.talked]
+        if strangers:
+            state["user_has_not_met"] = strangers
         doing = {self.name(c): self.doing[c] for c in self.ids if self.doing.get(c)}
         if doing:
             state["doing"] = doing

@@ -25,10 +25,14 @@ class ARoomItem : public AActor
 public:
 	ARoomItem();
 
-	/** A new item, in a color (for a flower), in someone's hand. */
-	static ARoomItem* Make(UWorld* World, ERoomItem Kind, USkeletalMeshComponent* Hand, const FLinearColor& Tint = FLinearColor::Red);
+	/** A new item, in a color (for a flower), in someone's hand, and what it's called, if not just its kind. */
+	static ARoomItem* Make(UWorld* World, ERoomItem Kind, USkeletalMeshComponent* Hand, const FLinearColor& Tint = FLinearColor::Red,
+		const FString& Name = FString());
 
 	ERoomItem GetKind() const { return Kind; }
+
+	/** What it's called, e.g. "a pink flower" or "a slice of cake". */
+	FString GetName() const;
 
 	/** Into someone else's hand. */
 	void PutIn(USkeletalMeshComponent* Hand);
@@ -42,6 +46,7 @@ private:
 	void Build(const FLinearColor& Tint);
 
 	ERoomItem Kind = ERoomItem::None;
+	FString Name;
 	// How much of it there is, from 0 to 1, as it comes and goes.
 	float Presence = 0.0f;
 	bool bVanishing = false;

@@ -1,5 +1,7 @@
-"""Three characters in a house, in an Unreal Engine game. Run with `uv run bot.py -t websocket`
-(the game starts a session through the runner's /start, and connects to it over a WebSocket).
+"""Three characters in a house, in an Unreal Engine game. Run with `uv run bot.py -t daily` (the
+game starts a session through the runner's /start, which makes a Daily room, with DAILY_API_KEY,
+for the game and the bot to meet in), or `uv run bot.py -t websocket` (the game connects to the
+bot over a WebSocket).
 
 The room, and a worker per character, share one runner and its bus:
 
@@ -10,7 +12,9 @@ The room, and a worker per character, share one runner and its bus:
 It's the kitchen table's conversation (one pipeline, a voice each, Jev reading every turn), in a
 house: the player walks from room to room, and only the characters close enough hear what they
 say (the game tells the bot who did, `space.py`). Each character's voice goes to the game on its
-own channel (`mixer.py`), so several can talk at once, each from where they stand. Jev reads every
+own: over Daily, on an audio track of its own (a transport destination each, which the game plays
+from their head); over a WebSocket, on a channel of its own (`mixer.py`). So several can talk at
+once, each from where they stand. Jev reads every
 turn (`room.py`), the engine decides what they do (`engine.py`), the director plays it out
 (`director.py`), and the floor decides when each line plays (`floor.py`). The game is told who's
 speaking and what they say, how they feel and what they do with their hands, and where they go.
@@ -24,6 +28,7 @@ import os
 import sys
 import threading
 import uuid
+from pathlib import Path
 
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -35,7 +40,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregator,
     LLMUserAggregatorParams,
 )
-from pipecat.runner.types import RunnerArguments, WebSocketRunnerArguments
+from pipecat.runner.types import DailyRunnerArguments, RunnerArguments, WebSocketRunnerArguments
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -57,6 +62,23 @@ from room import Referee
 
 load_environment()
 CAST = load_cast()
+
+
+def daily_transport(runner_args: DailyRunnerArguments) -> BaseTransport:
+    """The bot in the Daily room the runner made. A transport destination per character, each a
+    custom audio track named after them, which the game plays from their head; nothing goes out
+    on the bot's own microphone or camera. (Imported here: daily-python is for Linux and macOS,
+    so on Windows the bot runs in WSL, or over the WebSocket.)"""
+    from pipecat.transports.daily.transport import DailyParams, DailyTransport
+
+    params = DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_out_destinations=[c.id for c in CAST],
+        microphone_out_enabled=False,
+        camera_out_enabled=False,
+    )
+    return DailyTransport(runner_args.room_url, runner_args.token, "Pipecat Room", params)
 
 
 def transport_params() -> FastAPIWebsocketParams:
@@ -194,11 +216,14 @@ async def bot(runner_args: RunnerArguments) -> None:
     configure_logging(verbose=bool(getattr(getattr(runner_args, "cli_args", None), "verbose", 0)))
     session = (getattr(runner_args, "session_id", None) or uuid.uuid4().hex)[:8]
     with logger.contextualize(session=session):
-        if not isinstance(runner_args, WebSocketRunnerArguments):
-            raise RuntimeError("the game connects over a WebSocket: run with -t websocket")
-        transport = CastWebsocketTransport(
-            runner_args.websocket, transport_params(), channels=[c.id for c in CAST]
-        )
+        if isinstance(runner_args, DailyRunnerArguments):
+            transport = daily_transport(runner_args)
+        elif isinstance(runner_args, WebSocketRunnerArguments):
+            transport = CastWebsocketTransport(
+                runner_args.websocket, transport_params(), channels=[c.id for c in CAST]
+            )
+        else:
+            raise RuntimeError("the game connects over Daily or a WebSocket: run with -t daily")
         await run_bot(transport, runner_args)
 
 
@@ -213,17 +238,26 @@ def configure_logging(*, verbose: bool) -> None:
         return
     _logging_configured = True
     logger.configure(extra={"session": "-"})
-    if verbose:
-        return
-    logger.remove()
-    logger.add(
-        sys.stderr,
-        level=os.getenv("BOT_LOG_LEVEL", "INFO").upper(),
-        format=(
-            "<green>{time:HH:mm:ss.SSS}</green> | <level>{level: <7}</level> | "
-            "<cyan>{extra[session]}</cyan> | {name}:{line} - <level>{message}</level>"
-        ),
+    level = os.getenv("BOT_LOG_LEVEL", "INFO").upper()
+    log_format = (
+        "<green>{time:HH:mm:ss.SSS}</green> | <level>{level: <7}</level> | "
+        "<cyan>{extra[session]}</cyan> | {name}:{line} - <level>{message}</level>"
     )
+    if not verbose:
+        logger.remove()
+        logger.add(sys.stderr, level=level, format=log_format)
+    # And to logs/bot.log (BOT_LOG_FILE), a day's at a time, so it can be read afterwards, e.g.
+    # from Windows when the bot runs in WSL.
+    log_file = os.getenv("BOT_LOG_FILE", str(Path(__file__).parent / "logs" / "bot.log"))
+    if log_file:
+        logger.add(
+            log_file,
+            level="DEBUG" if verbose else level,
+            format=log_format,
+            rotation="1 day",
+            retention=7,
+            encoding="utf-8",
+        )
 
 
 if __name__ == "__main__":

@@ -13,7 +13,16 @@ import pytest
 from config import ACT_FLOOR, DOING_FLOOR, load_cast
 from director import Director
 from engine import Plan, Take
-from room import NOTE, NOTE_ACT, NOTE_EVENT, USER, Reading
+from room import (
+    NOTE,
+    NOTE_ACT,
+    NOTE_ACT_FOR,
+    NOTE_EVENT,
+    NOTE_NO_MUSIC,
+    USER,
+    Reading,
+    flower_color,
+)
 from space import Space
 
 CAST = load_cast()
@@ -65,17 +74,106 @@ def test_whoever_is_asked_to_do_something_is_told_so_and_the_game_has_them_do_it
     assert plan.takes[0].note == NOTE_ACT["play"] and plan.takes[0].act == "play"
 
 
+def test_nobody_dances_without_music_they_ask_for_a_record_on(director: Director) -> None:
+    plan = Plan([Take(JUNO, "addressed", None, USER)], why="addressed", addressed=[JUNO])
+    assert director._with_act(plan, route(JUNO, act={"dance": 0.9})) is None
+    assert plan.takes[0].note == NOTE_NO_MUSIC
+    director.space.music = "hall"
+    plan = Plan([Take(JUNO, "addressed", None, USER)], why="addressed", addressed=[JUNO])
+    assert director._with_act(plan, route(JUNO, act={"dance": 0.9})) is not None
+
+
 def test_everyone_asked_dances_but_only_one_bakes_the_cake(director: Director) -> None:
     def everyone() -> Plan:
         takes = [Take(c, "chorus", "everyone", USER) for c in (MAYA, THEO, JUNO)]
         return Plan(takes, together=True, why="chorus", addressed=[MAYA, THEO, JUNO])
 
+    director.space.music = "hall"
     dance = director._with_act(everyone(), route(MAYA, act={"dance": 0.9}))
     assert dance is not None and dance["who"] == [JUNO, MAYA, THEO]
     plan = everyone()
     cook = director._with_act(plan, route(MAYA, act={"cook": 0.9}))
     assert cook is not None and cook["who"] == [MAYA]
     assert [t.act for t in plan.takes] == ["cook", None, None]
+
+
+def test_what_theyre_asked_to_bring_someone_else_goes_to_them(director: Director) -> None:
+    plan = Plan([Take(THEO, "addressed", None, USER)], why="addressed", addressed=[THEO])
+    act = director._with_act(plan, route(THEO, act={"food": 0.9}, for_={MAYA: 0.8, USER: 0.2}))
+    assert act == {"type": "act", "who": [THEO], "action": "food", "to": MAYA}
+    assert plan.takes[0].note == NOTE_ACT_FOR["food"].format(to="Maya")
+    # For the user, it's as before; and nobody brings themselves anything.
+    mine = Plan([Take(THEO, "addressed", None, USER)], why="addressed", addressed=[THEO])
+    act = director._with_act(mine, route(THEO, act={"food": 0.9}, for_={USER: 0.9}))
+    assert act is not None and "to" not in act
+    own = Plan([Take(THEO, "addressed", None, USER)], why="addressed", addressed=[THEO])
+    act = director._with_act(own, route(THEO, act={"food": 0.9}, for_={THEO: 0.9}))
+    assert act is not None and "to" not in act
+
+
+def test_a_flower_is_the_color_asked_for_or_a_surprise(director: Director) -> None:
+    assert flower_color("Could I have a yellow flower?") == "yellow"
+    assert flower_color("red or white, I can't decide") is None
+    assert flower_color("pick me a flower") is None
+    plan = Plan([Take(MAYA, "addressed", None, USER)], why="addressed", addressed=[MAYA])
+    reading = route(MAYA, act={"flower": 0.9})
+    reading.heard = "Maya, could you pick me a yellow flower?"
+    act = director._with_act(plan, reading)
+    assert act == {"type": "act", "who": [MAYA], "action": "flower", "color": "yellow"}
+    assert "a yellow flower" in (plan.takes[0].note or "")
+    surprise = Plan([Take(MAYA, "addressed", None, USER)], why="addressed", addressed=[MAYA])
+    reading.heard = "Maya, could you pick me a flower?"
+    act = director._with_act(surprise, reading)
+    assert act is not None and "color" not in act
+    assert "Don't say what color" in (surprise.takes[0].note or "")
+
+
+def test_asked_to_introduce_the_user_they_lead_the_way_and_wait(director: Director) -> None:
+    director.space.update(
+        {
+            "user": {"area": "conservatory"},
+            "characters": {
+                MAYA: {"area": "conservatory", "hears": [USER]},
+                JUNO: {"area": "music", "hears": []},
+            },
+        }
+    )
+    plan = Plan([Take(MAYA, "addressed", None, USER)], why="addressed", addressed=[MAYA])
+    reading = route(MAYA, act={"introduce": 0.9}, for_={JUNO: 0.9}, move={"go:music": 0.9})
+    assert director._with_move(plan, reading) is None  # the introduction leads the way
+    act = director._with_act(plan, reading)
+    assert act == {"type": "act", "who": [MAYA], "action": "introduce", "to": JUNO}
+    assert plan.takes[0].note == NOTE_ACT_FOR["introduce"].format(to="Juno")
+    assert "follow you" in (plan.takes[0].note or "")
+    # Juno's right here: no leading the way.
+    director.space.update(
+        {
+            "user": {"area": "music"},
+            "characters": {
+                MAYA: {"area": "music", "hears": [USER, JUNO]},
+                JUNO: {"area": "music", "hears": [USER, MAYA]},
+            },
+        }
+    )
+    here = Plan([Take(MAYA, "addressed", None, USER)], why="addressed", addressed=[MAYA])
+    director._with_act(here, reading)
+    assert "right here" in (here.takes[0].note or "")
+    # To whom? They ask.
+    whom = Plan([Take(MAYA, "addressed", None, USER)], why="addressed", addressed=[MAYA])
+    assert director._with_act(whom, route(MAYA, act={"introduce": 0.9})) is None
+    assert whom.takes[0].note == "Ask the person who they'd like to meet."
+
+
+async def test_together_at_last_they_introduce_the_user(
+    director: Director, played: list[Plan]
+) -> None:
+    await director.event(
+        {"kind": "introduce", "who": MAYA, "to": JUNO, "heard_by": [MAYA, JUNO, USER]}
+    )
+    [plan] = played
+    assert plan.takes[0].speaker == MAYA and plan.takes[0].to == JUNO
+    assert "Introduce them to each other" in (plan.takes[0].note or "")
+    assert JUNO in director.space.talked  # and now the user has met her
 
 
 def test_nobody_does_anything_on_a_turn_they_didnt_hear(director: Director) -> None:
@@ -100,6 +198,25 @@ async def test_whoever_hands_the_person_something_says_so(
     [note] = [ln for ln in director.transcript.lines if ln.speaker == NOTE]
     assert note.text == "Theo handed the person a slice of cake."
     assert note.heard(THEO) and not note.heard(MAYA)
+
+
+async def test_whoever_is_handed_something_says_so_to_whoever_gave_it(
+    director: Director, played: list[Plan]
+) -> None:
+    await director.event(
+        {
+            "kind": "handed",
+            "who": THEO,
+            "to": MAYA,
+            "item": "a slice of cake",
+            "heard_by": [THEO, MAYA],
+        }
+    )
+    [plan] = played
+    assert [t.speaker for t in plan.takes] == [MAYA] and plan.takes[0].to == THEO
+    assert plan.takes[0].note == NOTE_EVENT["received"].format(who="Theo", item="a slice of cake")
+    [note] = [ln for ln in director.transcript.lines if ln.speaker == NOTE]
+    assert note.text == "Theo handed Maya a slice of cake."
 
 
 async def test_the_bell_brings_everyone_and_they_all_say_something(
@@ -147,10 +264,10 @@ async def test_whats_happened_waits_until_nobody_is_talking_and_goes_stale(
     monkeypatch.setattr(Director, "busy", property(lambda self: False))
     at, plan = director._events[0]
     director._events[0] = (at - 60.0, plan)  # long ago: it's not news any more
-    await director._greet()
+    await director._news()
     assert played == [] and director._events == []
     director._events.append((time.monotonic(), plan))
-    await director._greet()
+    await director._news()
     assert played == [plan]
 
 
@@ -189,7 +306,7 @@ async def test_the_latest_news_comes_first_and_the_bell_drowns_out_the_rest(
     await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO]})
     await director.event({"kind": "visit", "who": MAYA, "to": JUNO, "heard_by": [MAYA, JUNO]})
     monkeypatch.setattr(Director, "busy", property(lambda self: False))
-    await director._greet()
+    await director._news()
     assert [p.why for p in played] == ["visit"]
     monkeypatch.setattr(Director, "busy", property(lambda self: True))
     await director.event({"kind": "visit", "who": JUNO, "to": THEO, "heard_by": [JUNO, THEO]})

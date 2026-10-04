@@ -32,6 +32,9 @@ HISTORY_LINES = 30
 # near-ties, and a name, a question about what someone said, or a correction always wins.
 RECENCY_WEIGHT = 1.2
 INCLUDED_FLOOR = 0.5  # a group turn: how sure Jev must be that a character is one of those asked
+# A move or an act: how sure Jev must be that someone who isn't answering out loud was asked too
+# ("you two, follow me", with only one of them answering), to do it with the rest.
+ALSO_ASKED_FLOOR = 0.7
 CHORUS_FLOOR = 0.5  # ...and that they can all answer at once, rather than in turn
 ONLY_IF_FLOOR = 0.5  # ...and that only those it's true for should ("say yes if…")
 TRUE_OF_FLOOR = 0.5  # ...and, for each, that it's true of them
@@ -45,6 +48,7 @@ MOVE_FLOOR = 0.6
 # ...or to do something (dance, play the piano, bring them cake): the same, and more so for a
 # character setting about something of their own accord, as they say a line.
 ACT_FLOOR = 0.6
+FOR_FLOOR = 0.6  # ...and, for something brought or handed over, who it's for, if not the user
 DOING_FLOOR = 0.75
 # Something that happened in the house (a gift, the bell, music) is reacted to this soon, or not
 # at all: by the time the room is quiet again, it's old news.

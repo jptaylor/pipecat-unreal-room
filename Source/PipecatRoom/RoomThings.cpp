@@ -38,9 +38,6 @@ const FLinearColor Wood = Srgb(130, 90, 64);
 const FLinearColor Soil = Srgb(84, 62, 48);
 const FLinearColor Leaf = Srgb(84, 140, 76);
 
-const FLinearColor Blooms[] = {
-	Srgb(226, 64, 80), Srgb(246, 196, 64), Srgb(240, 140, 180), Srgb(250, 246, 240), Srgb(150, 110, 210), Srgb(250, 130, 70),
-};
 } // namespace
 
 ARoomThings::ARoomThings()
@@ -151,7 +148,7 @@ void ARoomThings::BuildConservatory()
 				const float Tall = Random.FRandRange(26.0f, 44.0f);
 				RoomShapes::Add(this, nullptr, EShape::Cylinder, Base + FVector(0.0f, 0.0f, Tall / 2), FVector(1.2f, 1.2f, Tall), Leaf, 0.7f);
 				RoomShapes::Add(this, nullptr, EShape::Sphere, Base + FVector(0.0f, 0.0f, Tall), FVector(9.0f, 9.0f, 6.5f),
-					Blooms[Random.RandRange(0, UE_ARRAY_COUNT(Blooms) - 1)], 0.5f);
+					RoomTypes::Blooms()[Random.RandRange(0, RoomTypes::Blooms().Num() - 1)].Color, 0.5f);
 				RoomShapes::Add(this, nullptr, EShape::Sphere, Base + FVector(3.0f, 0.0f, Tall * 0.45f), FVector(7.0f, 2.0f, 3.0f), Leaf, 0.7f,
 					FRotator(25.0f, Random.FRandRange(0.0f, 360.0f), 0.0f));
 			}

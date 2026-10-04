@@ -29,7 +29,7 @@ ARoomItem::ARoomItem()
 	SetActorEnableCollision(false);
 }
 
-ARoomItem* ARoomItem::Make(UWorld* World, ERoomItem Kind, USkeletalMeshComponent* Hand, const FLinearColor& Tint)
+ARoomItem* ARoomItem::Make(UWorld* World, ERoomItem Kind, USkeletalMeshComponent* Hand, const FLinearColor& Tint, const FString& Name)
 {
 	if (!World || Kind == ERoomItem::None)
 	{
@@ -41,10 +41,16 @@ ARoomItem* ARoomItem::Make(UWorld* World, ERoomItem Kind, USkeletalMeshComponent
 		return nullptr;
 	}
 	Item->Kind = Kind;
+	Item->Name = Name;
 	Item->Build(Tint);
 	Item->SetActorScale3D(FVector(0.01f));
 	Item->PutIn(Hand);
 	return Item;
+}
+
+FString ARoomItem::GetName() const
+{
+	return Name.IsEmpty() ? FString(RoomTypes::ItemName(Kind)) : Name;
 }
 
 void ARoomItem::Build(const FLinearColor& Tint)

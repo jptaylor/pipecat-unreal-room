@@ -51,7 +51,6 @@ from room import (
     NOTE_GROUP_FIRST,
     NOTE_GROUP_NEXT,
     NOTE_LULL,
-    NOTE_MEET,
     NOTE_NOT_HEARD,
     NOTE_REACT,
     NOTE_REPLY,
@@ -65,6 +64,7 @@ from room import (
     Line,
     Reading,
     Transcript,
+    mentions,
     names,
 )
 
@@ -203,10 +203,6 @@ class Engine:
         takes = [Take(c, "welcome", NOTE_WELCOME, USER) for c in self.transcript.cast]
         return Plan(takes, together=True, why="welcome")
 
-    def meet(self, character: str) -> Plan:
-        """The user has come up to `character` for the first time: they say hi."""
-        return Plan([Take(character, "welcome", NOTE_MEET, USER)], why="meet")
-
     def route(self, reading: Reading) -> Plan:
         """The user has spoken (their line is already in the transcript): what they asked for,
         committed: a new exchange starts, and who they spoke to is remembered."""
@@ -277,6 +273,14 @@ class Engine:
             takes = group_takes(members, transcript, "group", NOTE_GROUP_FIRST, NOTE_GROUP_NEXT)
             return Plan(takes, why="group", addressed=members)
         if reading.choice in ids and reading.choice not in heard:
+            if mark is not None and not mentions(mark.text, transcript.label(reading.choice)):
+                # Unnamed, and too far away to hear it: Jev went by who the user spoke to last,
+                # but they've walked away from them. It's for whoever is with them now.
+                who = max(heard, key=lambda c: (reading.addressed(c), reading.included.get(c, 0.0)))
+                note = None
+                if last is not None and last.speaker != who:
+                    note = NOTE_SWITCH.format(other=transcript.label(last.speaker))
+                return Plan([Take(who, "addressed", note, USER)], why="addressed", addressed=[who])
             return self._not_heard(reading, heard, [reading.choice])
         if reading.choice in ids:
             # Talking to someone who didn't just speak: tell them so, or a correction such as
