@@ -1,0 +1,47 @@
+[
+  {
+    "id": "maya",
+    "name": "Maya",
+    "role": "Botanist",
+    "tagline": "Grows everything in the conservatory. Talks to her tomatoes.",
+    "topics": "plants, flowers, gardens, growing fruit and vegetables, soil, seasons, nature",
+    "colour": "green",
+    "hex": "#5fa85a",
+    "voice": "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+    "voiceName": "Skylar",
+    "body": "quinn",
+    "home": "conservatory",
+    "height": 0.97,
+    "place": "the conservatory"
+  },
+  {
+    "id": "theo",
+    "name": "Theo",
+    "role": "Chef",
+    "tagline": "Cooks whatever Maya grows, in the kitchen. Grumbles about it the whole time.",
+    "topics": "food, cooking, recipes, ingredients, kitchens, restaurants",
+    "colour": "orange",
+    "hex": "#e3803c",
+    "voice": "ef191366-f52f-447a-a398-ed8c0f2943a1",
+    "voiceName": "Archie",
+    "body": "manny",
+    "home": "kitchen",
+    "height": 1.02,
+    "place": "the kitchen"
+  },
+  {
+    "id": "juno",
+    "name": "Juno",
+    "role": "Musician",
+    "tagline": "Plays five instruments badly and one brilliantly, in the music room. Always humming.",
+    "topics": "music, songs, instruments, bands, concerts, singing, dancing",
+    "colour": "pink",
+    "hex": "#c8467a",
+    "voice": "391f4c0a-f1a8-4c21-9aa2-7a07f0a4b0dc",
+    "voiceName": "Bronte",
+    "body": "quinn",
+    "home": "music",
+    "height": 1.0,
+    "place": "the music room"
+  }
+]

@@ -1,0 +1,37 @@
+# Unreal Engine build output and caches.
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# Copied from the engine by setup.ps1, and created by it, except the splash
+# screens and Pipecat's logo.
+/Content/*
+!/Content/Splash/
+!/Content/Movies/
+
+# Built by Plugins/Pipecat/ThirdParty/build-windows.ps1 or build-linux.sh.
+Plugins/Pipecat/ThirdParty/build/
+Plugins/Pipecat/ThirdParty/Linux/
+Plugins/Pipecat/ThirdParty/Win64/
+
+# NVIDIA's DLSS plugins, from NVIDIA's DLSS download (see the README).
+Plugins/DLSS/
+Plugins/Streamline*/
+
+# Editor project files.
+*.code-workspace
+*.sln
+.vscode/
+.vs/
+.idea/
+
+# The bot's virtual environment, caches and secrets.
+bot/.venv/
+bot/.env
+bot/__pycache__/
+bot/**/__pycache__/
+bot/.pytest_cache/
+bot/.ruff_cache/

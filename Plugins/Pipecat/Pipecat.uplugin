@@ -1,0 +1,31 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Pipecat",
+	"Description": "Talk to Pipecat bots with voice, using the Pipecat C++ Client SDK and its Daily transport.",
+	"Category": "Audio",
+	"CreatedBy": "Daily",
+	"CreatedByURL": "https://pipecat.ai",
+	"CanContainContent": false,
+	"Modules": [
+		{
+			"Name": "Pipecat",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Linux",
+				"Win64"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "AudioCapture",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64"
+			]
+		}
+	]
+}

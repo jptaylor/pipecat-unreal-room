@@ -1,0 +1,8 @@
+# You as the host: set them off, cut in, redirect, let them carry on, ask for quiet.
+Otto, what do you really think of Theo's cooking?
+!2 Hang on, Edith, you've been quiet. What do you make of all this?
+Sorry, carry on.
+...
+Shh, everyone, let me think for a second.
+...
+Right. Juno, play us something?
