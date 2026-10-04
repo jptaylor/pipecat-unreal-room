@@ -559,6 +559,8 @@ def addressee_question(cast: Sequence[Character]) -> ChoiceQuestion:
                 "'which of you had the boat?') goes to whoever said it: look for it in "
                 "`conversation`.",
                 "A reply to what a character just said or asked goes to that character.",
+                "Asking for something someone has ('can I have that flower back?', 'pass me the "
+                "cake'), with no name, is for whoever is holding it (`holding`).",
                 "A follow-up that carries on the user's previous question, such as 'and number?', "
                 "'why?' or 'really?', goes to whoever they spoke to last (`user_last_spoke_to`), "
                 "unless it names someone else, or they've walked away from them "

@@ -179,6 +179,9 @@ class Space:
         doing = {self.name(c): self.doing[c] for c in self.ids if self.doing.get(c)}
         if doing:
             state["doing"] = doing
+        holding = {self.name(c): self.holding[c] for c in self.ids if self.holding.get(c)}
+        if holding:
+            state["holding"] = holding
         if self.music:
             state["music"] = f"playing in {self.area_name(self.music)}"
         return state

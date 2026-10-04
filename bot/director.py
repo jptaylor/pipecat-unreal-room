@@ -45,7 +45,7 @@ import random
 import time
 from collections import deque
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from loguru import logger
@@ -796,6 +796,7 @@ class Director:
         reading = weigh(
             reading, self._favoured({c for c in self.cast if line.heard(c)}), RECENCY_WEIGHT
         )
+        reading = self._ask_holder(reading, line)
         # Nobody talks over the user: if they've gone on, their next words take the floor, and
         # the two are read as one turn.
         if await self._more(epoch, ended):
@@ -928,6 +929,9 @@ class Director:
         if guess is None or guess.error:
             return None
         guess = weigh(guess, self._favoured(), RECENCY_WEIGHT)
+        guess = self._ask_holder(
+            guess, Line(USER, guess.heard, heard_by=frozenset(self.space.heard_user()))
+        )
         if guess.choice is None or guess.p(guess.choice) < SPECULATE_FLOOR:
             return None
         if guess.wants(INTENT_FLOOR) != ANSWER:
@@ -994,6 +998,24 @@ class Director:
         self.log_reading(reading)
         await self._arm_lull()
         await self.play(plan)
+
+    def _ask_holder(self, reading: Reading, line: Line) -> Reading:
+        """Asking for what someone has ('can I have that flower back?') is asking them: if Jev
+        read the user's turn as for someone with nothing to hand over, it's for whoever heard it
+        who's holding something (the thing the user named, if several are)."""
+        if reading.error or reading.wants_act(ACT_FLOOR) != "hand":
+            return reading
+        holding = self.space.holding
+        if reading.choice in self.cast and holding.get(reading.choice):
+            return reading
+        holders = [c for c in self.cast if holding.get(c) and line.heard(c)]
+        said = line.text.lower()
+        named = [c for c in holders if holding[c].split()[-1].lower() in said]
+        who = named[0] if len(named) == 1 else holders[0] if len(holders) == 1 else None
+        if who is None:
+            return reading
+        logger.info(f"Director: {self.cast[who].name} has {holding[who]}: it's them that's asked")
+        return replace(reading, choice=who)
 
     def _free(self, character: str, take: Take) -> bool:
         """Whether `character` is free to set about something of their own accord: not asked

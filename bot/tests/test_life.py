@@ -200,6 +200,26 @@ def test_doing_what_the_user_asked_their_own_lines_dont_send_them_off(
     assert not director._free(MAYA, Take(MAYA, "addressed", None, USER, moving=True))
 
 
+def test_asking_for_what_someone_has_is_asking_them(director: Director) -> None:
+    director.space.update(
+        {
+            "characters": {
+                MAYA: {"area": "hall", "hears": [USER, JUNO]},
+                JUNO: {"area": "hall", "hears": [USER, MAYA], "holding": "a pink flower"},
+                THEO: {"area": "hall", "hears": [USER], "holding": "a slice of cake"},
+            }
+        }
+    )
+    line = director.transcript.add(USER, "Can I have that flower back?", heard_by=None)
+    asked = director._ask_holder(route(MAYA, act={"hand": 0.9}), line)
+    assert asked.choice == JUNO  # the flower's hers, not Maya's
+    cake = director.transcript.add(USER, "Could you pass me the cake?", heard_by=None)
+    assert director._ask_holder(route(MAYA, act={"hand": 0.9}), cake).choice == THEO
+    # Asking someone who has something, or for something else, is as Jev read it.
+    assert director._ask_holder(route(THEO, act={"hand": 0.9}), line).choice == THEO
+    assert director._ask_holder(route(MAYA, act={"dance": 0.9}), line).choice == MAYA
+
+
 def test_nobody_does_anything_on_a_turn_they_didnt_hear(director: Director) -> None:
     plan = Plan([Take(THEO, "not_heard", "…", USER)], why="not_heard", addressed=[MAYA])
     assert director._with_act(plan, route(MAYA, act={"flower": 0.9})) is None
