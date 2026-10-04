@@ -195,6 +195,19 @@ async def test_one_request_answers_the_choice_every_inclusion_the_chorus_and_the
     assert classifier.calls == 2
 
 
+async def test_jev_is_told_who_heard_the_line_it_reads(transcript: Transcript) -> None:
+    referee = Referee(CountingClassifier(), CAST)
+    history = list(transcript.lines)
+    route = await referee.addressee(
+        transcript, history, "what's that?", last_addressed=[OTTO], heard_by=frozenset({THEO})
+    )
+    latest = route.state["latest"]
+    assert latest["heard_by"] == [transcript.label(THEO)]
+    assert transcript.label(OTTO) in latest["out_of_earshot"]  # spoken to last, walked away from
+    reply = await referee.reply(transcript, history, THEO, "Hm?", heard_by=frozenset({OTTO}))
+    assert reply.state["latest"]["heard_by"] == [transcript.label(OTTO)]
+
+
 async def test_a_reply_read_asks_who_answers_the_momentum_and_who_reacts(
     transcript: Transcript,
 ) -> None:

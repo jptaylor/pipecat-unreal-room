@@ -77,7 +77,7 @@ FAutoConsoleCommandWithWorldAndArgs ActCommand(
 		if (Character)
 		{
 			ARoomCharacter* For = Args.Num() > 2 ? Stage->FindCharacter(Args[2]) : nullptr;
-			Stage->Act(Character, Args[1], For, Args.Num() > 3 ? Args[3] : FString());
+			Stage->Act(Character, Args[1], For != Character ? For : nullptr, Args.Num() > 3 ? Args[3] : FString());
 		}
 	}));
 
@@ -205,6 +205,10 @@ void ARoomStage::UpdatePrompt(float DeltaSeconds)
 		float Nearest = GiveReach;
 		for (ARoomCharacter* Character : Characters)
 		{
+			if (Character->GetHeld())
+			{
+				continue;  // their hands are full
+			}
 			FVector To = Character->GetActorLocation() - Where;
 			To.Z = 0.0f;
 			const float Distance = To.Size() * ((To.GetSafeNormal() | Facing) < 0.0f ? 1.6f : 1.0f);
@@ -368,10 +372,15 @@ void ARoomStage::Act(ARoomCharacter* Character, const FString& What, ARoomCharac
 		}
 		Character->StopDoing();
 		Character->SetDancing(true, false);
+		SittingOut.Remove(Character->GetId());
 	}
 	else if (What == TEXT("stop"))
 	{
 		Character->StopDoing();
+		if (Character->IsDancing())
+		{
+			SittingOut.Add(Character->GetId());  // this record, anyway
+		}
 		Character->SetDancing(false);
 	}
 	else if (What == TEXT("play"))
@@ -711,7 +720,8 @@ void ARoomStage::UpdateLife(float DeltaSeconds)
 		const double Beat = Things->GetBeatAt(Character->GetActorLocation(), Strength);
 		Character->SetBeat(Beat, Strength);
 		const bool bStill = Character->GetVelocity().Size2D() < 10.0f;
-		if (Things->IsGramophoneOn() && Strength > 0.55f && !Character->IsBusy() && bStill && !Character->IsDancing())
+		if (Things->IsGramophoneOn() && Strength > 0.55f && !Character->IsBusy() && bStill && !Character->IsDancing() &&
+			!SittingOut.Contains(Id) && !IsBeingIntroduced(Character))
 		{
 			Character->SetDancing(true, true);
 		}
@@ -737,7 +747,8 @@ void ARoomStage::UpdateLife(float DeltaSeconds)
 		const bool bWithPlayer = Player && House.IsValid() && House->AreaAt(Player->GetActorLocation()) == House->AreaAt(Here);
 		const double* Talked = Engaged.Find(Id);
 		const bool bFree = Character->GetIntent() == ERoomIntent::Home && !Character->IsBusy() && !Character->IsDancing() && !bSpeaks &&
-						   !bWithPlayer && (!Talked || Clock - *Talked > 40.0) && !IsBeingIntroduced(Character);
+						   !bWithPlayer && (!Talked || Clock - *Talked > 40.0) && !IsBeingIntroduced(Character) &&
+						   !BeingVisited.Contains(Id);
 		if (Clock >= NextRoutine[Id])
 		{
 			NextRoutine[Id] = Clock + FMath::FRandRange(25.0f, 45.0f);
@@ -757,7 +768,7 @@ void ARoomStage::UpdateLife(float DeltaSeconds)
 				const bool bOtherWithPlayer = Player && House.IsValid() &&
 											  House->AreaAt(Player->GetActorLocation()) == House->AreaAt(Other->GetActorLocation());
 				if (Other != Character && Other->GetIntent() == ERoomIntent::Home && !Other->IsBusy() && !bOtherWithPlayer &&
-					(!OtherTalked || Clock - *OtherTalked > 40.0) && !IsBeingIntroduced(Other))
+					(!OtherTalked || Clock - *OtherTalked > 40.0) && !IsBeingIntroduced(Other) && !BeingVisited.Contains(Other->GetId()))
 				{
 					Hosts.Add(Other);
 				}
@@ -768,6 +779,33 @@ void ARoomStage::UpdateLife(float DeltaSeconds)
 			}
 		}
 	}
+	// A new record (or none): whoever sat the last one out may dance again.
+	if (Things->IsGramophoneOn() != bWasGramophoneOn)
+	{
+		bWasGramophoneOn = Things->IsGramophoneOn();
+		SittingOut.Reset();
+	}
+
+	// Waiting where they were sent (to the kitchen by the bell, say) with the
+	// player nowhere near: after a couple of minutes, they go home.
+	for (ARoomCharacter* Character : Characters)
+	{
+		float& Alone = Waited.FindOrAdd(Character->GetId());
+		const bool bNearPlayer = Player && Reaches(Character->GetHeadLocation(), PlayerHead(), CharacterRange, Character, Player);
+		const bool bHosting = Introductions.ContainsByPredicate([Character](const FIntroduction& Each) { return Each.Host.Get() == Character; });
+		if (Character->GetIntent() != ERoomIntent::Wait || Character->IsBusy() || bNearPlayer || IsBeingIntroduced(Character) || bHosting)
+		{
+			Alone = 0.0f;
+			continue;
+		}
+		Alone += DeltaSeconds;
+		if (Alone > 120.0f)
+		{
+			Alone = 0.0f;
+			Character->SetIntent(ERoomIntent::Home);
+		}
+	}
+
 	// The music's quieter while anyone speaks over it.
 	Things->Duck(bAnyVoice ? 1.0f : 0.0f);
 	UpdateIntroductions();
@@ -862,11 +900,17 @@ void ARoomStage::Visit(ARoomCharacter* Visitor, ARoomCharacter* Host)
 					 Data->SetStringField(TEXT("place"), Place);
 					 Self->Event(TEXT("visit"), Data, Self->Witnesses(Guest->GetActorLocation(), SeenFrom));
 				 }),
-					FRoomStep::BusyWith(ERoomActivity::None, FMath::FRandRange(35.0f, 55.0f)), FRoomStep::Call([Guest]() {
-						if (Guest.IsValid())
-						{
-							Guest->TalkTo(nullptr);
-						}
-					})},
-		FString::Printf(TEXT("visiting %s in %s"), *Host->GetCast().Name, *Place));
+					FRoomStep::BusyWith(ERoomActivity::None, FMath::FRandRange(35.0f, 55.0f))},
+		FString::Printf(TEXT("visiting %s in %s"), *Host->GetCast().Name, *Place), [Self, Guest, HostId = Host->GetId()]() {
+			// Over, or cut short: either way, they're both free again.
+			if (Guest.IsValid())
+			{
+				Guest->TalkTo(nullptr);
+			}
+			if (Self.IsValid())
+			{
+				Self->BeingVisited.Remove(HostId);
+			}
+		});
+	BeingVisited.Add(Host->GetId());
 }

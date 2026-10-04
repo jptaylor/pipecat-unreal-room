@@ -129,7 +129,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         pipeline,
         name=ROOM,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
-        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        # Not when the room's been quiet a while (a player may explore without a word): it
+        # ends when the game leaves.
+        idle_timeout_secs=None,
     )
     director.worker = room
 

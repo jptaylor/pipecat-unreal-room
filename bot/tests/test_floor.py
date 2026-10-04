@@ -215,6 +215,15 @@ async def test_a_line_with_nothing_to_say_finishes_at_once(setup) -> None:
     assert ("finished", 1, None) in listener.events
 
 
+async def test_a_chorus_voice_that_never_sounds_still_finishes(setup) -> None:
+    floor, listener, _ = setup
+    await floor.expect(1, "maya", after=set(), delay=0.0, chorus=7)
+    await floor.expect(2, "theo", after=set(), delay=0.15, chorus=7)
+    await floor.complete(2, stops=0)  # Theo's TTS failed: no audio at all
+    await asyncio.sleep(0.3)
+    assert ("finished", 2, None) in listener.events  # nothing waits on him for ever
+
+
 async def test_the_first_voice_of_a_chorus_ready_goes_first(setup) -> None:
     floor, _, gate = setup
     await floor.expect(1, "maya", after=set(), delay=0.3, chorus=7)

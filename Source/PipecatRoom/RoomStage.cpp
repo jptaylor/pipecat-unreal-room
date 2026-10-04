@@ -183,6 +183,7 @@ FAutoConsoleCommandWithWorldAndArgs CaptionCommand(
 		Line->SetStringField(TEXT("speaker"), Who);
 		Line->SetStringField(TEXT("text"), FString::Join(Words, TEXT(" ")));
 		Stage->HandleMessage(ToJson(Line));
+		Stage->ShowWhole(Who);
 	}));
 
 FAutoConsoleCommandWithWorldAndArgs MessageCommand(
@@ -439,9 +440,11 @@ void ARoomStage::UpdateSpeech(float DeltaSeconds)
 	{
 		Floor += (Smoothed - Floor) * FMath::Min(1.0f, 1.5f * DeltaSeconds);
 	}
-	else if (!bSpeaking)
+	else
 	{
-		Floor += (Smoothed - Floor) * FMath::Min(1.0f, 0.4f * DeltaSeconds);
+		// Slowly even while "speaking", so a steady sound that began mid-sentence
+		// (music, say) becomes the room's noise, rather than the player forever.
+		Floor += (Smoothed - Floor) * FMath::Min(1.0f, (bSpeaking ? 0.05f : 0.4f) * DeltaSeconds);
 	}
 	Floor = FMath::Clamp(Floor, -90.0f, -38.0f);
 
@@ -462,9 +465,11 @@ void ARoomStage::UpdateSpeech(float DeltaSeconds)
 		bSpeaking = true;
 		Hangover = HangoverSeconds;
 	}
-	else if (Level < Stop)
+	else if (bSpeaking)
 	{
-		Hangover -= DeltaSeconds;
+		// Under the threshold: they've stopped, after a moment, or a while longer
+		// if it's still more than the room's noise (quieter words, say).
+		Hangover -= Level < Stop ? DeltaSeconds : DeltaSeconds * 0.35f;
 		if (Hangover <= 0.0f)
 		{
 			bSpeaking = false;
@@ -755,6 +760,25 @@ void ARoomStage::HandleBotReady()
 void ARoomStage::HandleDisconnected()
 {
 	bReady = false;
+	for (ARoomCharacter* Character : Characters)
+	{
+		Character->SetThinking(false);
+		Character->TalkTo(nullptr);
+		Character->SetListening(nullptr);
+	}
+	if (Captions)
+	{
+		for (const TPair<FString, FSaying>& Saying : Sayings)
+		{
+			Captions->FadeOut(Saying.Key, 1.0f);
+		}
+		for (const FString& Was : Speaking)
+		{
+			Captions->FadeOut(Was, 1.0f);
+		}
+	}
+	Sayings.Reset();
+	Speaking.Reset();
 	UE_LOG(LogRoomStage, Log, TEXT("Disconnected from the bot"));
 	if (Captions && bShowStatus)
 	{
@@ -809,6 +833,19 @@ AActor* ARoomStage::Resolve(const FString& Id) const
 		return UGameplayStatics::GetPlayerPawn(this, 0);
 	}
 	return FindCharacter(Id);
+}
+
+void ARoomStage::ShowWhole(const FString& Speaker)
+{
+	if (FSaying* Saying = Sayings.Find(Speaker))
+	{
+		Saying->bHeard = true;
+		Saying->bWhole = true;
+		if (ARoomCharacter* Character = FindCharacter(Speaker))
+		{
+			UpdateSaying(Character, *Saying, 0.0f, 0.0f);
+		}
+	}
 }
 
 void ARoomStage::UpdateSaying(ARoomCharacter* Character, FSaying& Saying, float ChannelLevel, float DeltaSeconds)
@@ -939,6 +976,11 @@ void ARoomStage::HandleMessage(const FString& Message)
 			{
 				Sayings.Remove(Speaker);
 			}
+			if (ARoomCharacter* Character = FindCharacter(Speaker); Character && !Speaking.Contains(Speaker))
+			{
+				Character->SetThinking(false);
+				Character->TalkTo(nullptr);
+			}
 			Captions->FadeOut(Speaker, 0.3f);
 			return;
 		}
@@ -957,6 +999,10 @@ void ARoomStage::HandleMessage(const FString& Message)
 			FSaying& Saying = Sayings.FindOrAdd(Speaker);
 			if (Saying.Id != Id)
 			{
+				if (Saying.bHeard && Saying.Clarity > 0.3f)
+				{
+					Learn(Saying.Text);
+				}
 				Saying = FSaying();
 				Saying.Id = Id;
 			}
@@ -1005,6 +1051,12 @@ void ARoomStage::HandleMessage(const FString& Message)
 		FString Speaker, Target;
 		Json->TryGetStringField(TEXT("speaker"), Speaker);
 		Json->TryGetStringField(TEXT("target"), Target);
+		// Whose take it is, for if it's dropped before a line of it is sent.
+		int32 Take = 0;
+		if (Json->TryGetNumberField(TEXT("take"), Take) && !Speaker.IsEmpty())
+		{
+			Lines.Add(FString::Printf(TEXT("t%d"), Take), Speaker);
+		}
 		if (ARoomCharacter* Character = FindCharacter(Speaker))
 		{
 			Character->SetThinking(true);

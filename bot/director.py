@@ -175,6 +175,11 @@ class Live:
         return self.plan.speaker
 
 
+# What takes a character somewhere by itself, and back: asked to do one of these, any "go to
+# the kitchen" read alongside it is the errand's, not a move.
+ERRANDS = {"food", "flower", "hand", "introduce", "cook", "play", "music_on", "music_off", "water"}
+
+
 class Director:
     """Decides who speaks, and keeps the one transcript every character is shown."""
 
@@ -184,6 +189,8 @@ class Director:
         self.space = Space(cast)
         # What happened in the house, still to be reacted to, and when it happened (monotonic).
         self._events: list[tuple[float, Plan]] = []
+        self._routing = 0  # user turns being read and acted on
+        self._lull_timer: asyncio.Task | None = None  # a lull waited out after an unanswered turn
         self.engine = Engine(self.transcript)
         self.referee = referee
         self.floor = Floor(self, list(self.cast))
@@ -303,12 +310,16 @@ class Director:
             self._where()
 
     async def _news(self) -> None:
-        """Whatever happened while the table was talking, the latest first, if it's still news."""
-        if self.busy or self._user_speaking:
+        """Whatever happened while the table was talking, the latest first, if it's still news:
+        once nobody's talking, nor being heard out (a user turn being routed), unless the table's
+        been hushed."""
+        if self.busy or self._user_speaking or self._routing or self.engine.hushed:
             return
         while self._events:
             at, plan = self._events.pop()
             if time.monotonic() - at < EVENT_STALE_S:
+                if plan.fresh:
+                    self.engine.fresh()  # a new exchange, from when it plays
                 await self.play(plan)
                 return
 
@@ -343,11 +354,9 @@ class Director:
             speaker = who
         elif kind == "visit" and who in self.cast and to in self.cast:
             speaker, target = who, to
-            self.engine.fresh()
         elif kind == "introduce" and who in self.cast and to in self.cast:
             # They've brought the user to meet someone: they introduce them, and they've met.
             speaker, target = who, to
-            self.engine.fresh()
             self._talked_with([to])
         elif kind == "picked":
             owner = str(data.get("owner") or "")
@@ -366,7 +375,7 @@ class Director:
             takes = [Take(speaker, "event", note, target)]
             if said == "handing" and to in heard_by:
                 takes.append(Take(to, "event", NOTE_EVENT["received"].format(**fields), who))
-            plan = Plan(takes, why=said)
+            plan = Plan(takes, why=said, fresh=said in ("visit", "introduce"))
         else:
             return
         logger.info(f"Director: {kind} ({', '.join(t.speaker for t in plan.takes)} to react)")
@@ -445,7 +454,11 @@ class Director:
         """What `take`'s character is shown: what they heard, and the moment's note, with where
         they are and who's with them first."""
         note = " ".join(n for n in (self.space.situation(take.speaker), take.note) if n)
-        return self.transcript.view(take.speaker, note or None)
+        view = self.transcript.view(take.speaker, note or None)
+        if take.reason in ("addressed", "group", "chorus") and take.to == USER:
+            # Answering the user: they've met now (the note above was written before).
+            self._talked_with([take.speaker])
+        return view
 
     async def _speak(self, live: Live, messages: list[dict[str, str]]) -> None:
         assert self.worker is not None
@@ -487,7 +500,11 @@ class Director:
         live.line = self.transcript.add(
             live.speaker, text, how=live.plan.how, chorus=live.chorus, heard_by=heard_by
         )
-        if live.plan.to == USER and USER in heard_by:
+        if (
+            live.plan.to == USER
+            and USER in heard_by
+            and live.plan.reason in ("not_heard", "fallback")
+        ):
             self._talked_with([live.speaker])
         if live.started:
             # Its first words were voiced, and started playing, before the rest was written.
@@ -515,7 +532,7 @@ class Director:
         doing = reading.does(DOING_FLOOR)
         if doing == "dance" and not self._dance_music():
             doing = None  # nothing to dance to yet
-        if doing and not self._free(live.speaker, live.plan):
+        if doing and doing != "stop" and not self._free(live.speaker, live.plan):
             # Doing what the user asked (following them, say), or busy already: what they say
             # doesn't send them off to do something else.
             doing = None
@@ -629,8 +646,13 @@ class Director:
 
     async def read(self, line: Line) -> Reading:
         """Jev's reading of a character's line: who answers it, its momentum, who reacts."""
-        history = self.transcript.lines[: self.transcript.lines.index(line)]
-        return await self.referee.reply(self.transcript, history, line.speaker, line.text)
+        lines = self.transcript.lines
+        if line not in lines:  # taken back meanwhile: nothing follows it
+            return Reading("reply", line.speaker, line.text, None, error="taken back")
+        history = lines[: lines.index(line)]
+        return await self.referee.reply(
+            self.transcript, history, line.speaker, line.text, heard_by=line.heard_by
+        )
 
     def _speaking(self) -> set[str]:
         """Characters with a take still to come or playing."""
@@ -660,7 +682,13 @@ class Director:
         elif live is not None and heard is not None:
             # Cut short: recorded as far as it was heard (even if it was never all written).
             if live.line is None and heard:
-                live.line = self.transcript.add(live.speaker, heard, how=live.plan.how)
+                live.line = self.transcript.add(
+                    live.speaker,
+                    heard,
+                    how=live.plan.how,
+                    chorus=live.chorus,
+                    heard_by=frozenset(self.space.listeners(live.speaker)),
+                )
             if live.line is not None and heard:
                 live.line.text, live.line.interrupted = heard, True
                 await self.emit_line(f"t{take}", live.line)
@@ -712,6 +740,8 @@ class Director:
         self._epoch += 1
         self._wake.set()
         self._queue.clear()
+        if self._lull_timer is not None and not self._lull_timer.done():
+            self._lull_timer.cancel()
         for live in list(self._lives.values()):
             if live.task is not None and not live.task.done():
                 live.task.cancel()  # cancels the job: the character stops writing and voicing
@@ -761,9 +791,13 @@ class Director:
         line, line_id, history, merged = self._user_line(said, ended)
         await self.emit_line(line_id, line)
         early = None if merged else await self._speculate(guess)
+        self._routing += 1
         try:
             await self._route(epoch, line, history, ended, guess, early)
         finally:
+            self._routing -= 1
+            if self._events and not self.busy:
+                self.spawn(self._news(), "news")
             if early is not None and not early.lives[0].confirmed.is_set():
                 # Never confirmed (a new turn took the floor, or this one failed): the lines
                 # started early are dropped, and their hold with them.
@@ -785,7 +819,11 @@ class Director:
         try:
             reading = await asyncio.wait_for(
                 self.referee.addressee(
-                    self.transcript, history, line.text, last_addressed=engine.addressed
+                    self.transcript,
+                    history,
+                    line.text,
+                    last_addressed=engine.addressed,
+                    heard_by=line.heard_by,
                 ),
                 ROUTE_WAIT_S,
             )
@@ -807,8 +845,6 @@ class Director:
         if not self._voice:
             await self.floor.resume()  # their words are a turn now: lines may start
         plan = engine.route(reading)
-        if plan.why in ("addressed", "group", "chorus"):
-            self._talked_with(t.speaker for t in plan.takes if line.heard(t.speaker))
         move = self._with_move(plan, reading)
         act = self._with_act(plan, reading)
         # Who answers, as planned: a "hands up if…" is only those it's true of.
@@ -838,9 +874,8 @@ class Director:
                 await self.floor.drop(live.take)
             await self.floor.release(early.hold)
         if not plan.takes and plan.why != "hush":
-            self.spawn(
-                self._lull_soon(), "lull after silence"
-            )  # nobody answers: nothing to idle on
+            # Nobody answers: nothing to idle on.
+            self._lull_timer = self.spawn(self._lull_soon(), "lull after silence")
         await self.play(plan)
 
     def _user_line(self, said: str, ended: float) -> tuple[Line, str, list[Line], bool]:
@@ -860,7 +895,8 @@ class Director:
             after = lines[lines.index(last) + 1 :]
             if all(ln.speaker == NOTE for ln in after):
                 for note in after:  # the asides of a route that's void now
-                    self.transcript.remove(note)
+                    if note.aside:
+                        self.transcript.remove(note)
                 last.text = normalize(f"{last.text} {said}")
                 last.heard_by = (last.heard_by or frozenset()) | heard
                 self._last_user_end, self._last_user_at = ended, now
@@ -971,8 +1007,14 @@ class Director:
         while self._preview_want and self._preview_want != read:
             read, turn = self._preview_want, self._turns
             history = list(self.transcript.lines)
+            heard_by = frozenset(self.space.heard_user()) if self.space.earshot_known else None
             reading = await self.referee.addressee(
-                self.transcript, history, read, last_addressed=engine.addressed, kind="preview"
+                self.transcript,
+                history,
+                read,
+                last_addressed=engine.addressed,
+                kind="preview",
+                heard_by=heard_by,
             )
             if turn != self._turns:  # the turn ended while Jev read it: the route has it
                 return
@@ -987,7 +1029,7 @@ class Director:
     async def idle(self) -> None:
         """The user aggregator says the user has been quiet a while: someone may pick something
         up, if the table isn't talking and the engine allows."""
-        if self.busy or self._user_speaking or self.engine.lull_wait() is None:
+        if self.busy or self._user_speaking or self._routing or self.engine.lull_wait() is None:
             return
         if not self.space.friends_near_user():
             return  # nobody near the user who knows them to say anything
@@ -1047,6 +1089,8 @@ class Director:
         """Everyone a request is for: those answering it, and anyone else who heard it whom Jev
         is sure was asked too ("you two, follow me", with only one of them answering)."""
         asked = {t.speaker for t in plan.takes}
+        if plan.why != "addressed":
+            return sorted(asked)  # a chorus ("hands up if…": those it's true of) or a group
         heard = self.space.heard_user()
         asked |= {
             c
@@ -1064,7 +1108,7 @@ class Director:
         action, area = wants
         if action == "go" and (not area or area not in self.space.areas):
             return None
-        if action == "go" and reading.wants_act(ACT_FLOOR) is not None:
+        if action == "go" and reading.wants_act(ACT_FLOOR) in ERRANDS:
             # An errand (bringing Maya cake, say) takes them where they need to go, and then
             # home: not to stay wherever it took them.
             return None

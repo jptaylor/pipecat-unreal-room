@@ -223,6 +223,7 @@ class Line:
     # Who heard it: character ids, and USER for a character's line the user heard. None:
     # everyone (before the game has said who's where).
     heard_by: frozenset[str] | None = None
+    aside: bool = False  # a route's note on how it was taken, void if the turn goes on
 
     def heard(self, character: str) -> bool:
         return self.speaker == character or self.heard_by is None or character in self.heard_by
@@ -391,13 +392,13 @@ NOTE_GROUP_NEXT = (
 )
 NOTE_CHORUS = (
     "The person asked {who} that, and everyone is answering at once, out loud. Answer for "
-    "yourself, in character: your own answer and your own reason, the way only you would put "
-    "it, in a few words."
+    'yourself, in character, in as few words as you can: often just "Yes!", "Me!" or '
+    '"Not me."'
 )
 NOTE_CHORUS_IF = (
     "The person asked only those it's true for to answer, and they're answering at once, you "
-    "among them: answer out loud in a few words, in character. (Only if it really isn't true "
-    f"for you, write {SILENT}.)"
+    "among them: answer out loud in as few words as you can, in character: often just "
+    f'"Me!" (Only if it really isn\'t true for you, write {SILENT}.)'
 )
 NOTE_WELCOME = (
     "The person has just walked in, and everyone at the table says hi at once, out loud. Say hi "
@@ -424,8 +425,8 @@ NOTE_ACT = {
 }
 # ...asked to dance with no music on: they ask for some first...
 NOTE_NO_MUSIC = (
-    "There's no music on, so you don't dance yet: tell the person to put a record on the "
-    "gramophone in the hall first, in your own words."
+    "There's no dance music on (a record on the gramophone in the hall), so you don't dance "
+    "yet: say, in a few words, that they'll need to put a record on first."
 )
 # ...a flower in the color asked for...
 NOTE_FLOWER_COLOR = "As you answer, you go to pick {to} a {color} flower, to bring it to them."
@@ -520,12 +521,12 @@ NOTE_MOVE = {
 }
 NOTE_REPLY = (
     "{other} just spoke to you or about you. It's your turn: answer {other} in one or two short "
-    "sentences, with the person listening."
+    "sentences."
 )
 NOTE_WRAP = (
     "{other} just spoke to you or about you. This chat is winding down: answer {other} in one "
-    "short sentence that lands it (agree, finish the joke, or turn it back to the person), and "
-    "don't ask anyone at the table anything new."
+    "short sentence that lands it (agree, finish the joke, or, if the person's with you, turn it "
+    "back to them), and don't ask anyone anything new."
 )
 NOTE_REACT = (
     "{other} just said that. React out loud on the spot, in one to four words, the way you would "
@@ -1150,6 +1151,7 @@ class Reading:
             "react": rounded(self.react),
             "move": rounded(self.move),
             "act": rounded(self.act),
+            "for": rounded(self.for_),
             "doing": rounded(self.doing),
             "feel": rounded(self.feel),
             "mood": rounded(self.mood),
@@ -1230,8 +1232,10 @@ class Referee:
         *,
         last_addressed: Sequence[str] = (),
         kind: str = "route",
+        heard_by: frozenset[str] | None = None,
     ) -> Reading:
-        state = transcript.for_jev(history, Line(USER, normalize(heard)), last_addressed)
+        latest = Line(USER, normalize(heard), heard_by=heard_by)
+        state = transcript.for_jev(history, latest, last_addressed)
         reading = Reading(kind, USER, normalize(heard), None, state=state)
         results = await self._ask(reading, ADDRESSEE)
         if results is not None:
@@ -1261,11 +1265,16 @@ class Referee:
         return reading
 
     async def reply(
-        self, transcript: Transcript, history: Sequence[Line], speaker: str, line: str
+        self,
+        transcript: Transcript,
+        history: Sequence[Line],
+        speaker: str,
+        line: str,
+        heard_by: frozenset[str] | None = None,
     ) -> Reading:
         """After `speaker`'s `line`: who, if anyone, answers it (`USER`: nobody, the user's go),
         how much momentum it has, and who reacts to it out loud."""
-        state = transcript.for_jev(history, Line(speaker, normalize(line)))
+        state = transcript.for_jev(history, Line(speaker, normalize(line), heard_by=heard_by))
         reading = Reading("reply", speaker, normalize(line), None, state=state)
         results = await self._ask(reading, f"{REPLY}{speaker}")
         if results is not None:
@@ -1351,7 +1360,12 @@ FLOWER_COLORS = ("red", "yellow", "pink", "white", "purple", "orange")
 def flower_color(text: str) -> str | None:
     """The color of flower `text` asks for or promises, if it names one of the conservatory's
     ("a yellow one, please"), and only one."""
-    said = {c for c in FLOWER_COLORS if re.search(rf"\b{c}\b", text.lower())}
+    lowered = text.lower()
+    said = {
+        c
+        for c in FLOWER_COLORS
+        if re.search(rf"\b{c}\b", lowered) and not re.search(rf"\b(not|no)\s+{c}\b", lowered)
+    }
     return said.pop() if len(said) == 1 else None
 
 
@@ -1368,7 +1382,7 @@ def mentions(text: str, name: str) -> bool:
             return True
         if (
             word not in NOT_NAMES
-            and len(word) >= len(target) - 1
+            and abs(len(word) - len(target)) <= 1
             and SequenceMatcher(None, word, target).ratio() >= 0.8
         ):
             return True

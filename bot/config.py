@@ -162,7 +162,7 @@ def load_cast(source: Path | None = None) -> tuple[Character, ...]:
             home=entry.get("home", ""),
             place=entry.get("place", ""),
         )
-        for entry in json.loads((source or HERE / "characters.json").read_text())
+        for entry in json.loads((source or HERE / "characters.json").read_text(encoding="utf-8"))
     )
     ids = [c.id for c in cast]
     if not 2 <= len(cast) <= MAX_CAST or len(set(ids)) != len(ids):

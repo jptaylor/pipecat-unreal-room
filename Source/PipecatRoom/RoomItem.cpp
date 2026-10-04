@@ -102,6 +102,10 @@ void ARoomItem::PutIn(USkeletalMeshComponent* Hand)
 	AttachToComponent(Hand, FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
 	SetActorRelativeLocation(Grip);
 	SetActorRelativeRotation(FRotator::ZeroRotator);
+	if (USceneComponent* Root = GetRootComponent())
+	{
+		Root->SetVisibility(Hand->IsVisible(), true);
+	}
 }
 
 void ARoomItem::Vanish()

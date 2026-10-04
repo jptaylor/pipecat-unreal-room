@@ -27,13 +27,21 @@ def director() -> Director:
 def test_a_turn_that_carries_on_one_nobody_answered_is_read_as_one(director: Director) -> None:
     line, first_id, _, merged = director._user_line("Felix.", ended=100.0)
     assert not merged
-    director.transcript.add(NOTE, "an aside of the route that's void now")
+    director.transcript.add(NOTE, "an aside of the route that's void now").aside = True
     director._voice_starts.append(100.6)  # they went on 0.6 s after the first words ended
     same, same_id, history, merged = director._user_line("Can you fix my bike?", ended=102.0)
     assert merged and same is line and same_id == first_id
     assert line.text == "Felix. Can you fix my bike?"
     assert [ln.speaker for ln in director.transcript.lines] == [USER]  # the aside is gone
     assert history == []
+
+
+def test_what_happened_meanwhile_isnt_taken_back_with_a_merged_turn(director: Director) -> None:
+    director._user_line("Felix.", ended=100.0)
+    director.transcript.add(NOTE, "The person gave Felix a flower.")
+    director._voice_starts.append(100.6)
+    director._user_line("Can you fix my bike?", ended=102.0)
+    assert [ln.speaker for ln in director.transcript.lines] == [USER, NOTE]
 
 
 def test_a_turn_after_someone_was_heard_is_a_new_turn(director: Director) -> None:

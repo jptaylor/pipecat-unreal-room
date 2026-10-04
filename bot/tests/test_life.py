@@ -14,6 +14,7 @@ from config import ACT_FLOOR, DOING_FLOOR, load_cast
 from director import Director
 from engine import Plan, Take
 from room import (
+    GROUP,
     NOTE,
     NOTE_ACT,
     NOTE_ACT_FOR,
@@ -358,3 +359,32 @@ async def test_the_latest_news_comes_first_and_the_bell_drowns_out_the_rest(
     await director.event({"kind": "visit", "who": JUNO, "to": THEO, "heard_by": [JUNO, THEO]})
     await director.event({"kind": "bell", "who": USER, "heard_by": [MAYA, THEO, JUNO]})
     assert [p.why for _, p in director._events] == ["bell"]
+
+
+async def test_news_waits_for_a_turn_being_routed_and_not_for_a_hushed_table(
+    director: Director, played: list[Plan]
+) -> None:
+    director._routing = 1  # Jev is reading the user's turn
+    await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO]})
+    assert played == [] and len(director._events) == 1
+    director._routing = 0
+    await director._news()
+    assert [p.why for p in played] == ["baked"]
+    director.engine.hush()
+    await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO]})
+    assert len(played) == 1  # the table's been hushed
+
+
+def test_only_an_errand_takes_the_place_of_going_somewhere(director: Director) -> None:
+    director.space.world({"areas": [{"id": "kitchen", "name": "the kitchen"}]})
+    plan = Plan([Take(THEO, "addressed", None, USER)], why="addressed", addressed=[THEO])
+    dance = route(THEO, move={"go:kitchen": 0.9}, act={"dance": 0.9})
+    assert director._with_move(plan, dance) is not None
+    errand = route(THEO, move={"go:kitchen": 0.9}, act={"cook": 0.9})
+    assert director._with_move(plan, errand) is None
+
+
+def test_hands_up_if_moves_only_those_its_true_of(director: Director) -> None:
+    plan = Plan([Take(THEO, "chorus", "…", USER)], True, "chorus", addressed=[THEO])
+    reading = route(GROUP, included={MAYA: 0.9, THEO: 0.9, JUNO: 0.9})
+    assert director._asked(plan, reading) == [THEO]

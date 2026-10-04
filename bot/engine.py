@@ -103,6 +103,7 @@ class Plan:
     # every character sees ("Otto answers that; it isn't true of the others…").
     addressed: list[str] | None = None
     aside: str | None = None
+    fresh: bool = False  # a new exchange, at full energy, when it plays (a visit, say)
 
 
 @dataclass
@@ -180,8 +181,10 @@ class Engine:
         """Seconds of talk in this exchange (estimated from the words): since the user last spoke,
         or since they told the table to carry on."""
         lines = self.transcript.since_user()
-        if self._mark is not None and self._mark in lines:
-            lines = lines[lines.index(self._mark) + 1 :]
+        every = self.transcript.lines
+        if self._mark is not None and self._mark in every:
+            after = {id(ln) for ln in every[every.index(self._mark) + 1 :]}
+            lines = [ln for ln in lines if id(ln) in after]
         return Transcript.talked(lines) + self._head_start
 
     def _fresh(self, mark: Line | None = None) -> None:
@@ -218,7 +221,8 @@ class Engine:
         if plan.aside:
             # Seen by those who heard what it's about.
             mark = self._user_line()
-            self.transcript.add(NOTE, plan.aside, heard_by=mark.heard_by if mark else None)
+            aside = self.transcript.add(NOTE, plan.aside, heard_by=mark.heard_by if mark else None)
+            aside.aside = True
         return plan
 
     def plan(self, reading: Reading) -> Plan:
@@ -244,7 +248,7 @@ class Engine:
             # Jev's pick of who "carry on" is said to is only news if it's someone the user
             # didn't just ask something ("carry on, Theo"); otherwise the old thread resumes.
             named = reading.choice if reading.choice not in self.addressed else None
-            return self._carry_on(named)
+            return self._carry_on(named, set(heard))
         if reading.choice == GROUP:
             asked = reading.group(ids)
             members = [m for m in asked if m in heard]
@@ -387,17 +391,27 @@ class Engine:
         """Quiet: the table says nothing more until the user speaks."""
         self._hushed = True
 
+    @property
+    def hushed(self) -> bool:
+        return self._hushed
+
     def carry_on(self, choice: str | None = None) -> Plan:
         """The table carries on, at full energy (see `_carry_on`)."""
         self._fresh()
         return self._carry_on(choice)
 
-    def _carry_on(self, choice: str | None) -> Plan:
+    def _carry_on(self, choice: str | None, heard: set[str] | None = None) -> Plan:
         """Whoever was cut off recently picks up where they were (the host cut in, maybe asked
         someone else something, then said "carry on"); otherwise `choice` if it's a character,
-        or whoever spoke last."""
-        ids = list(self.transcript.cast)
-        recent = [ln for ln in self.transcript.lines[-CARRY_ON_LOOKBACK:] if ln.by_character]
+        or whoever spoke last. Of those who heard the user (`heard`), if it's said."""
+        ids = [c for c in self.transcript.cast if heard is None or c in heard] or list(
+            self.transcript.cast
+        )
+        recent = [
+            ln
+            for ln in self.transcript.lines[-CARRY_ON_LOOKBACK:]
+            if ln.by_character and ln.speaker in ids
+        ]
         cut = next((ln for ln in reversed(recent) if ln.interrupted), None)
         last = recent[-1] if recent else None
         if cut is not None and choice not in ids:

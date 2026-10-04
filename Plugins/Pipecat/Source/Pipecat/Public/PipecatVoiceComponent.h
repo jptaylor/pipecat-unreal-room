@@ -241,6 +241,9 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UAudioComponent>> VoiceAudio;
 
+	// When a voice that's stopped may next be played again.
+	double NextVoiceRestart = 0.0;
+
 	UPROPERTY()
 	TArray<TObjectPtr<USoundWaveProcedural>> VoiceWaves;
 

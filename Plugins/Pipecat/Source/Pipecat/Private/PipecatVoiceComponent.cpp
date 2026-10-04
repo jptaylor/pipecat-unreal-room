@@ -106,6 +106,10 @@ public:
 			{
 				TransportOptions.bot_audio_tracks.push_back(ToStdString(Tracks[Index]));
 			}
+			if (!TransportOptions.bot_audio_tracks.empty())
+			{
+				ReadChannels = static_cast<int32>(TransportOptions.bot_audio_tracks.size());
+			}
 			Options.transport = std::make_unique<pipecat::DailyTransport>(TransportOptions);
 		}
 #else
@@ -134,6 +138,8 @@ public:
 	virtual ~FPipecatSession() override
 	{
 		Stop();
+		// Before the rest of the session, which its callbacks may still use.
+		Client.reset();
 	}
 
 	// Captures the microphone, and sends it to the bot whenever it's
@@ -179,10 +185,15 @@ public:
 
 	void Start(const FString& StartUrl, const FString& ApiKey)
 	{
-		if (ConnectThread.joinable())
+		if (Connecting)
 		{
 			return;
 		}
+		if (ConnectThread.joinable())
+		{
+			ConnectThread.join();  // the last connection's, long over
+		}
+		Connecting = true;
 
 		pipecat::APIRequest Request;
 		Request.endpoint = ToStdString(StartUrl);
@@ -215,6 +226,7 @@ public:
 					ReportError(FString::Printf(TEXT("Unable to connect: %hs"), Error.what()));
 				}
 			}
+			Connecting = false;
 		});
 	}
 
@@ -415,7 +427,9 @@ private:
 	// wave that plays it.
 	void PlayBotVoice()
 	{
-		const int32 Channels = FMath::Clamp(Waves.Num(), 1, MaxVoiceChannels);
+		// As many channels as the transport reads (fewer than the voices, if there are fewer
+		// tracks: the rest stay silent).
+		const int32 Channels = FMath::Clamp(ReadChannels > 0 ? FMath::Min(ReadChannels, Waves.Num()) : Waves.Num(), 1, MaxVoiceChannels);
 		const int32 FramesPerRead = BotSampleRate / 100;
 		std::vector<int16> Frames(FramesPerRead * Channels);
 		std::vector<int16> Channel(FramesPerRead);
@@ -458,6 +472,10 @@ private:
 	// Kept alive by the component, which stops the session first.
 	TArray<USoundWaveProcedural*> Waves;
 	EPipecatTransport Transport;
+	// The channels of the bot's audio, if fewer than the voices (0: as many).
+	int32 ReadChannels = 0;
+	// Whether a connection is being started, on ConnectThread.
+	std::atomic<bool> Connecting {false};
 	std::unique_ptr<pipecat::PipecatClient> Client;
 	FPipecatMicrophone Microphone;
 
@@ -493,6 +511,8 @@ void UPipecatVoiceComponent::BeginPlay()
 	// attached somewhere else.
 	AActor* Owner = GetOwner();
 	VoiceChannels = FMath::Clamp(VoiceChannels, 1, MaxVoiceChannels);
+	VoiceWaves.Reset();
+	VoiceAudio.Reset();
 	for (int32 Channel = 0; Channel < VoiceChannels; ++Channel)
 	{
 		USoundWaveProcedural* Wave = NewObject<USoundWaveProcedural>(this);
@@ -506,7 +526,8 @@ void UPipecatVoiceComponent::BeginPlay()
 		Wave->VirtualizationMode = EVirtualizationMode::PlayWhenSilent;
 		VoiceWaves.Add(Wave);
 
-		UAudioComponent* Audio = NewObject<UAudioComponent>(Owner, *FString::Printf(TEXT("PipecatVoice%d"), Channel));
+		UAudioComponent* Audio = NewObject<UAudioComponent>(
+			Owner, MakeUniqueObjectName(Owner, UAudioComponent::StaticClass(), *FString::Printf(TEXT("PipecatVoice%d"), Channel)));
 		if (USceneComponent* Root = Owner->GetRootComponent())
 		{
 			Audio->SetupAttachment(Root);
@@ -556,8 +577,11 @@ void UPipecatVoiceComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (Audio)
 		{
 			Audio->Stop();
+			Audio->DestroyComponent();
 		}
 	}
+	VoiceAudio.Reset();
+	VoiceWaves.Reset();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -570,11 +594,17 @@ void UPipecatVoiceComponent::TickComponent(
 
 	// If something stops one of the bot's voices, play it again, without what
 	// was waiting to be played.
+	const double Now = FPlatformTime::Seconds();
+	if (Now < NextVoiceRestart)
+	{
+		return;
+	}
 	for (int32 Channel = 0; Channel < VoiceAudio.Num(); ++Channel)
 	{
 		UAudioComponent* Audio = VoiceAudio[Channel];
-		if (Audio && IsReady() && !Audio->IsPlaying())
+		if (Audio && IsReady() && !Audio->IsPlaying() && Channel < VoiceWaves.Num())
 		{
+			NextVoiceRestart = Now + 2.0;
 			UE_LOG(LogPipecat, Warning, TEXT("The bot's voice %d stopped playing, playing it again"), Channel);
 			VoiceWaves[Channel]->ResetAudio();
 			Audio->Play();

@@ -254,9 +254,9 @@ void ARoomCharacter::SetIntent(ERoomIntent InIntent, FName Area)
 	Intent = InIntent;
 	GoArea = Area;
 	Replan = 0.0f;
+	Stop();
 	if (Intent == ERoomIntent::Wait)
 	{
-		Stop();
 		RestYaw = GetActorRotation().Yaw;
 	}
 	UE_LOG(LogRoomCharacter, Log, TEXT("%s: %s%s%s"), *Info.Id, GetIntentName(), Area.IsNone() ? TEXT("") : TEXT(" to "),
@@ -296,6 +296,11 @@ void ARoomCharacter::Do(TArray<FRoomStep> InSteps, const FString& InDoing, TFunc
 void ARoomCharacter::StopDoing()
 {
 	const bool bWasBusy = !Steps.IsEmpty();
+	if (bWasBusy && Steps[0].Kind == FRoomStep::EKind::Give)
+	{
+		TalkTo(nullptr);
+	}
+	Replan = 0.0f;
 	if (bWasBusy)
 	{
 		UE_LOG(LogRoomCharacter, Log, TEXT("%s: stopped %s"), *Info.Id, *Doing);
@@ -326,6 +331,7 @@ void ARoomCharacter::NextStep()
 	bStepStarted = false;
 	if (Steps.IsEmpty())
 	{
+		Replan = 0.0f;
 		UE_LOG(LogRoomCharacter, Log, TEXT("%s: done %s"), *Info.Id, *Doing);
 		Doing.Reset();
 		Activity = ERoomActivity::None;
@@ -398,9 +404,10 @@ void ARoomCharacter::UpdateJob(float DeltaSeconds)
 			bFacingFixed = false;
 			MoveTo(House.IsValid() ? House->KeepInside(Step.Where) : Step.Where, 30.0f);
 		}
-		else if (!bWalking)
+		else if (!bWalking || StepTime > 40.0f)
 		{
 			// There, or as near as they'll get: they face the way they'll work.
+			Stop();
 			RestYaw = Step.Yaw;
 			bFacingFixed = true;
 			NextStep();
@@ -434,13 +441,22 @@ void ARoomCharacter::UpdateJob(float DeltaSeconds)
 		if (Away > 150.0f && StepTime < 30.0f)
 		{
 			// Up to them, keeping up as they move.
-			if (!bWalking || Replan <= 0.0f)
+			if (!bWalking || (Replan <= 0.0f && FVector::Dist2D(To->GetActorLocation(), GiveFrom) > 80.0f))
 			{
 				Replan = 0.5f;
-				const FVector Spot = House.IsValid() ? House->FindSpotBy(To->GetActorLocation(), Here, 110.0f)
-													 : To->GetActorLocation() + (Here - To->GetActorLocation()).GetSafeNormal2D() * 110.0f;
+				GiveFrom = To->GetActorLocation();
+				const FVector Spot = House.IsValid() ? House->FindSpotBy(GiveFrom, Here, 110.0f)
+													 : GiveFrom + (Here - GiveFrom).GetSafeNormal2D() * 110.0f;
 				MoveTo(Spot, 30.0f);
 			}
+			break;
+		}
+		if (Away > 250.0f)
+		{
+			// They couldn't get to them: they keep it.
+			UE_LOG(LogRoomCharacter, Log, TEXT("%s: couldn't reach %s to hand over %s"), *Info.Id, *To->GetName(), *Held->GetName());
+			TalkTo(nullptr);
+			NextStep();
 			break;
 		}
 		// Then they hold it out, and it's taken.
@@ -726,7 +742,7 @@ void ARoomCharacter::UpdateMovement(float DeltaSeconds)
 	To.Z = 0.0f;
 	float Distance = To.Size();
 	const bool bLast = PathIndex == Path.Num() - 1;
-	if (!bLast && Distance < 70.0f)
+	if (!bLast && Distance < 45.0f)
 	{
 		++PathIndex;
 		Waypoint = Path[PathIndex];
@@ -778,6 +794,17 @@ void ARoomCharacter::UpdateMovement(float DeltaSeconds)
 			Stuck = 0.0f;
 			StuckTimes = FVector::Dist2D(Here, StuckAt) < 40.0f ? StuckTimes + 1 : 1;
 			StuckAt = Here;
+			if (PathIndex == Path.Num() - 1 && FVector::Dist2D(Here, Goal) < 130.0f)
+			{
+				// As near as they'll get (someone's in the way, say).
+				Stop();
+				if (Steps.IsEmpty() && (Intent == ERoomIntent::Come || Intent == ERoomIntent::Go))
+				{
+					Intent = ERoomIntent::Wait;
+				}
+				RestYaw = GetActorRotation().Yaw;
+				return;
+			}
 			const FVector Target = Goal;
 			MoveTo(Target, Accept);
 			if (StuckTimes >= 2 && House.IsValid())

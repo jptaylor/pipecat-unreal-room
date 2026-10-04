@@ -56,7 +56,7 @@ const float Margin = 70.0f;
 // How far from furniture paths keep: a character's width, and a little more
 // at its corners, which paths turn at.
 const float Clearance = 48.0f;
-const float CornerClearance = 62.0f;
+const float CornerClearance = 72.0f;
 
 // Whether the straight line from A to B goes through Box.
 bool Crosses(const FVector2D& A, const FVector2D& B, const FBox2D& Box)

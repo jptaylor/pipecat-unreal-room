@@ -305,7 +305,21 @@ private:
 		bool bWhole = false;
 	};
 	TMap<FString, FSaying> Sayings;
+	// Who's been asked to stop dancing: they sit this record out.
+	TSet<FString> SittingOut;
+	bool bWasGramophoneOn = false;
+	// Who's being visited (by id), and so stays put for it.
+	TSet<FString> BeingVisited;
+	// How long each character has been waiting where they were sent, out of
+	// the player's earshot: a while, and they go home.
+	TMap<FString, float> Waited;
 	void UpdateSaying(ARoomCharacter* Character, FSaying& Saying, float ChannelLevel, float DeltaSeconds);
+
+public:
+	/** A character's caption, all of it, now, e.g. for Room.Caption. */
+	void ShowWhole(const FString& Speaker);
+
+private:
 	TMap<FString, FString> Lines;
 	// When each character was last logged speaking, by their voice.
 	TMap<FString, double> LoggedVoice;

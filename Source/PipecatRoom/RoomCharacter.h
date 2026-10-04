@@ -203,6 +203,8 @@ private:
 	float Accept = 60.0f;
 	bool bWalking = false;
 	float Stuck = 0.0f;
+	// Where whoever they're handing something to was, when they set off to them.
+	FVector GiveFrom = FVector::ZeroVector;
 	// How many times running they've been stuck where they are, and where.
 	int32 StuckTimes = 0;
 	FVector StuckAt = FVector::ZeroVector;

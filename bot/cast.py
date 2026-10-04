@@ -57,7 +57,7 @@ def prompt(me: Character, cast: Sequence[Character]) -> str:
     """`me`'s system prompt: `prompts/character.md`, with `prompts/<id>.md` as their persona and
     everyone else at the table listed."""
     persona_file = PROMPTS / f"{me.id}.md"
-    persona = persona_file.read_text().strip() if persona_file.exists() else ""
+    persona = persona_file.read_text(encoding="utf-8").strip() if persona_file.exists() else ""
     others = [c for c in cast if c.id != me.id]
     values = {
         "name": me.name,
@@ -70,7 +70,7 @@ def prompt(me: Character, cast: Sequence[Character]) -> str:
         "example": others[0].name,
     }
     values["persona"] = fill(persona, values)
-    return fill((PROMPTS / "character.md").read_text().strip(), values)
+    return fill((PROMPTS / "character.md").read_text(encoding="utf-8").strip(), values)
 
 
 def fill(template: str, values: dict[str, str]) -> str:

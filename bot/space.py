@@ -138,12 +138,14 @@ class Space:
                 + f" {verb} close enough to hear you."
             )
         if USER in self.hears.get(me, set()):
-            where = (
-                "here with you"
-                if self.user_area == area
-                else f"in {self.area_name(self.user_area)}"
-            )
-            parts.append(f"The person is {where}, close enough to talk to.")
+            if self.user_area and self.user_area == area:
+                parts.append("The person is here with you, close enough to talk to.")
+            elif self.user_area:
+                parts.append(
+                    f"The person is in {self.area_name(self.user_area)}, close enough to talk to."
+                )
+            else:
+                parts.append("The person is close enough to talk to.")
             if me not in self.talked:
                 parts.append(
                     "You haven't met the person before: if they say hello, say hello back, "

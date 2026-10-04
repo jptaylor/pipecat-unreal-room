@@ -23,7 +23,7 @@ namespace
 // one that records what the computer plays (a loopback), or a virtual one.
 bool IsNotAMicrophone(const FString& Name)
 {
-	for (const TCHAR* Word : {TEXT("Controller"), TEXT("DualSense"), TEXT("DUALSHOCK"), TEXT("Xbox"), TEXT("Loop-back"),
+	for (const TCHAR* Word : {TEXT("Wireless Controller"), TEXT("Xbox Controller"), TEXT("DualSense"), TEXT("DUALSHOCK"), TEXT("Loop-back"),
 			 TEXT("Loopback"), TEXT("Stereo Mix"), TEXT("What U Hear"), TEXT("Steam Streaming"), TEXT("Virtual"), TEXT("CABLE Output")})
 	{
 		if (Name.Contains(Word))

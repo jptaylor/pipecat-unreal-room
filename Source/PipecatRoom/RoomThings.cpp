@@ -390,7 +390,10 @@ bool ARoomThings::FindInteraction(const FVector& Where, const FVector& Facing, E
 	};
 	const bool bEmpty = Held == ERoomItem::None;
 	Consider(TEXT("gramophone"), 0, Reach, IsGramophoneOn() ? TEXT("Stop the music") : TEXT("Put a record on"));
-	Consider(TEXT("piano"), 0, 150.0f, TEXT("Play the piano"));
+	if (!IsPianoPlaying())
+	{
+		Consider(TEXT("piano"), 0, 150.0f, TEXT("Play the piano"));
+	}
 	Consider(TEXT("bell"), 0, 160.0f, TEXT("Ring the dinner bell"));
 	if (bEmpty)
 	{

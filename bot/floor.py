@@ -178,8 +178,21 @@ class Floor:
             if cue is not None and cue.live:
                 cue.complete, cue.stops, cue.progress_at = True, stops, time.monotonic()
                 logger.debug(f"Floor: take {take} complete, {stops} runs ({cue.state})")
+                if cue.chorus is not None and cue.slot is None:
+                    # A voice of a chorus that never sounded (its TTS failed, say): it takes a
+                    # slot anyway, so it's opened, and finishes, and doesn't hold up the rest.
+                    self._take_slot(cue)
+                    await self._release()
                 await self._settle(cue)
         await self._dispatch()
+
+    def _take_slot(self, cue: Cue) -> None:
+        """The earliest slot of its chorus still free, for a voice that's ready (or done)."""
+        assert cue.chorus is not None
+        slots = sorted(self._slots.get(cue.chorus) or [0.0])
+        cue.slot = slots.pop(0)
+        self._slots[cue.chorus] = slots
+        self._chorus_start.setdefault(cue.chorus, time.monotonic())
 
     async def drop(self, take: int) -> None:
         """Abandon a line. Unheard, it's dropped; already going out, it's left to finish as it
@@ -239,10 +252,7 @@ class Floor:
                 cue.held.append(frame)
                 if cue.chorus is not None and cue.slot is None:
                     # Ready: this voice takes the chorus's earliest slot still free.
-                    slots = sorted(self._slots.get(cue.chorus) or [0.0])
-                    cue.slot = slots.pop(0)
-                    self._slots[cue.chorus] = slots
-                    self._chorus_start.setdefault(cue.chorus, time.monotonic())
+                    self._take_slot(cue)
                     await self._release()
             else:
                 await self._forward(cue, frame)
