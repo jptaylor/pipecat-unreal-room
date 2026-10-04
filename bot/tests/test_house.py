@@ -79,17 +79,17 @@ def test_the_game_says_who_hears_whom() -> None:
     assert space.listeners(THEO) == {USER, JUNO}
     assert space.near_user() == {THEO, JUNO}
     assert space.situation(THEO) == (
-        "You're in the kitchen, with Juno. Maya isn't close enough to hear you. The person is "
-        "here with you, close enough to talk to. You haven't met the person before: if they say "
-        "hello, say hello back, give your name and ask theirs, in a few words."
+        "You're in the kitchen, with Juno. Maya (in the conservatory) isn't close enough to hear "
+        "you. The person is here with you, close enough to talk to. You haven't met the person "
+        "before: if they say hello, say hello back, give your name and ask theirs, in a few words."
     )
     space.talked_with(THEO)
     assert space.situation(THEO) == (
-        "You're in the kitchen, with Juno. Maya isn't close enough to hear you. The person is "
-        "here with you, close enough to talk to."
+        "You're in the kitchen, with Juno. Maya (in the conservatory) isn't close enough to hear "
+        "you. The person is here with you, close enough to talk to."
     )
     assert "following the person" in space.situation(JUNO)
-    assert "isn't close enough" in space.situation(MAYA)
+    assert "The person is in the kitchen, too far away to hear you." in space.situation(MAYA)
 
 
 def test_only_those_the_user_has_met_speak_up_unasked() -> None:

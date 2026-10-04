@@ -456,8 +456,13 @@ NOTE_EVENT = {
     "handed": (
         "You've just handed the person {item}. Say something to them as you do, in a few words."
     ),
+    "handing": (
+        "You're handing {to} {item}. Say so to {to} as you do, in a few words, like \"Here you "
+        'go, {to}: {item}."'
+    ),
     "received": (
-        "{who} has just handed you {item}. React to it out loud, in a few words, in character."
+        "{who} has just handed you {item}. Say something to {who} about it, in a few words, in "
+        "character: thanks, say."
     ),
     "bell": (
         "Someone has just rung the dinner bell in the kitchen, and you're heading there. Say "

@@ -244,7 +244,7 @@ async def test_whoever_hands_the_person_something_says_so(
     assert note.heard(THEO) and not note.heard(MAYA)
 
 
-async def test_whoever_is_handed_something_says_so_to_whoever_gave_it(
+async def test_handing_someone_something_is_said_and_answered(
     director: Director, played: list[Plan]
 ) -> None:
     await director.event(
@@ -257,8 +257,10 @@ async def test_whoever_is_handed_something_says_so_to_whoever_gave_it(
         }
     )
     [plan] = played
-    assert [t.speaker for t in plan.takes] == [MAYA] and plan.takes[0].to == THEO
-    assert plan.takes[0].note == NOTE_EVENT["received"].format(who="Theo", item="a slice of cake")
+    assert [(t.speaker, t.to) for t in plan.takes] == [(THEO, MAYA), (MAYA, THEO)]
+    assert not plan.together  # in turn: he says it, she answers
+    assert plan.takes[0].note == NOTE_EVENT["handing"].format(to="Maya", item="a slice of cake")
+    assert plan.takes[1].note == NOTE_EVENT["received"].format(who="Theo", item="a slice of cake")
     [note] = [ln for ln in director.transcript.lines if ln.speaker == NOTE]
     assert note.text == "Theo handed Maya a slice of cake."
 

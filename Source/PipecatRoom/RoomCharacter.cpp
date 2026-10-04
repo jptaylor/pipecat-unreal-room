@@ -573,7 +573,19 @@ FVector ARoomCharacter::SlotNearPlayer(bool bBehind) const
 	const FVector Direction = FRotator(0.0f, Player->GetActorRotation().Yaw + Angle, 0.0f).Vector();
 	FVector Spot = Player->GetActorLocation() + Direction * Distance;
 	Spot.Z = GetActorLocation().Z;
-	return House.IsValid() ? House->ClearOf(House->KeepInside(Spot)) : Spot;
+	if (!House.IsValid())
+	{
+		return Spot;
+	}
+	// In the player's room, clear of the furniture: if the place behind or in
+	// front of them is through a wall (they're by one, facing it), or in
+	// something, the nearest clear place around them instead.
+	const FVector Kept = House->KeepInside(Spot);
+	if (House->AreaAt(Kept) != House->AreaAt(Player->GetActorLocation()) || FVector::Dist2D(House->ClearOf(Kept), Kept) > 0.5f)
+	{
+		return House->FindSpotBy(Player->GetActorLocation(), GetActorLocation(), Distance);
+	}
+	return Kept;
 }
 
 void ARoomCharacter::MoveTo(const FVector& InGoal, float InAccept)
@@ -662,6 +674,13 @@ void ARoomCharacter::UpdateMovement(float DeltaSeconds)
 		if (Player && Replan <= 0.0f)
 		{
 			Replan = 0.6f;
+			// Already beside them (having just handed them something, say): there.
+			if (!bWalking && FVector::Dist2D(Here, Player->GetActorLocation()) < 220.0f)
+			{
+				Intent = ERoomIntent::Wait;
+				RestYaw = GetActorRotation().Yaw;
+				break;
+			}
 			const FVector Spot = SlotNearPlayer(false);
 			if (!bWalking || FVector::Dist2D(Goal, Spot) > 120.0f)
 			{

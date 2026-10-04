@@ -336,9 +336,9 @@ class Director:
         said = kind
         if kind == "gift" and to in self.cast:
             speaker = to
-        elif kind == "handed" and to in self.cast and to in heard_by:
-            # Handed to one of them: whoever got it says something, to whoever gave it.
-            speaker, target, said = to, who if who in self.cast else USER, "received"
+        elif kind == "handed" and to in self.cast and who in self.cast:
+            # Handed to one of them: whoever gives it says so, and whoever gets it answers.
+            speaker, target, said = who, to, "handing"
         elif kind in ("handed", "baked") and who in self.cast:
             speaker = who
         elif kind == "visit" and who in self.cast and to in self.cast:
@@ -363,7 +363,10 @@ class Director:
             self._events.clear()
         elif speaker is not None and said in NOTE_EVENT:
             note = NOTE_EVENT[said].format(**fields)
-            plan = Plan([Take(speaker, "event", note, target)], why=said)
+            takes = [Take(speaker, "event", note, target)]
+            if said == "handing" and to in heard_by:
+                takes.append(Take(to, "event", NOTE_EVENT["received"].format(**fields), who))
+            plan = Plan(takes, why=said)
         else:
             return
         logger.info(f"Director: {kind} ({', '.join(t.speaker for t in plan.takes)} to react)")

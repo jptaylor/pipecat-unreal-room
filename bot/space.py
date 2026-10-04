@@ -129,10 +129,14 @@ class Space:
         if within:
             parts[0] += ", with " + _names([self.name(c) for c in within])
         parts[0] += "."
-        away = [self.name(c) for c in self.ids if c != me and c not in within]
+        # Where the others are now, which isn't always where they usually are.
+        away = [c for c in self.ids if c != me and c not in within]
         if away:
             verb = "isn't" if len(away) == 1 else "aren't"
-            parts.append(f"{_names(away)} {verb} close enough to hear you.")
+            parts.append(
+                _names([f"{self.name(c)} ({self._in(c)})" for c in away])
+                + f" {verb} close enough to hear you."
+            )
         if USER in self.hears.get(me, set()):
             where = (
                 "here with you"
@@ -146,7 +150,11 @@ class Space:
                     "give your name and ask theirs, in a few words."
                 )
         else:
-            parts.append("The person isn't close enough to hear you.")
+            parts.append(
+                f"The person is in {self.area_name(self.user_area)}, too far away to hear you."
+                if self.user_area
+                else "The person isn't close enough to hear you."
+            )
         intent = self.intent.get(me, "")
         if intent == "follow":
             parts.append("You're following the person around the house.")
@@ -159,6 +167,11 @@ class Space:
         if self.music:
             parts.append(f"Music is playing in {self.area_name(self.music)}.")
         return " ".join(parts)
+
+    def _in(self, character: str) -> str:
+        """Where `character` is now, e.g. "in the kitchen"."""
+        area = self.where.get(character, "")
+        return f"in {self.area_name(area)}" if area else "somewhere in the house"
 
     def for_jev(self) -> dict[str, Any]:
         """Where everyone is, and whom the user has met, for Jev's state."""

@@ -111,6 +111,12 @@ FAutoConsoleCommandWithWorldAndArgs RoutineCommand(
 		}
 	}));
 
+// A moment with whoever they've just handed something to, before going on.
+FRoomStep Linger()
+{
+	return FRoomStep::BusyWith(ERoomActivity::None, 4.0f);
+}
+
 // A flower from the conservatory's bed, at random.
 const RoomTypes::FRoomBloom& AnyBloom()
 {
@@ -464,7 +470,7 @@ void ARoomStage::Act(ARoomCharacter* Character, const FString& What, ARoomCharac
 		}
 		if (What == TEXT("food") && Player)
 		{
-			Steps.Add(FRoomStep::GiveTo(Player));
+			Steps.Append({FRoomStep::GiveTo(Player), Linger()});
 		}
 		Character->Do(MoveTemp(Steps), What == TEXT("cook") ? TEXT("baking a cake") : FString::Printf(TEXT("fetching %s %s"), *Whom,
 			bTomato ? TEXT("a tomato") : TEXT("some cake")), [Stuff]() {
@@ -491,7 +497,7 @@ void ARoomStage::Act(ARoomCharacter* Character, const FString& What, ARoomCharac
 			FRoomStep::TakeItem(ERoomItem::Flower, Bloom.Color, Bloom.Name)};
 		if (Player)
 		{
-			Steps.Add(FRoomStep::GiveTo(Player));
+			Steps.Append({FRoomStep::GiveTo(Player), Linger()});
 		}
 		Character->Do(MoveTemp(Steps), FString::Printf(TEXT("picking %s %s"), *Whom, Bloom.Name));
 	}
@@ -529,7 +535,7 @@ void ARoomStage::Act(ARoomCharacter* Character, const FString& What, ARoomCharac
 	}
 	else if (What == TEXT("hand") && Character->GetHeld() && Player)
 	{
-		Character->Do({FRoomStep::GiveTo(Player)}, FString::Printf(TEXT("handing %s %s"), *Whom, *Character->GetHeld()->GetName()));
+		Character->Do({FRoomStep::GiveTo(Player), Linger()}, FString::Printf(TEXT("handing %s %s"), *Whom, *Character->GetHeld()->GetName()));
 	}
 }
 
