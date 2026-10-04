@@ -18,6 +18,61 @@ DEFINE_LOG_CATEGORY_STATIC(LogPipecatMicrophone, Log, All);
 
 namespace
 {
+// Whether a capture device isn't someone's microphone: a game controller's
+// (a DualSense's, which Windows may make the default when it's plugged in), or
+// one that records what the computer plays (a loopback), or a virtual one.
+bool IsNotAMicrophone(const FString& Name)
+{
+	for (const TCHAR* Word : {TEXT("Controller"), TEXT("DualSense"), TEXT("DUALSHOCK"), TEXT("Xbox"), TEXT("Loop-back"),
+			 TEXT("Loopback"), TEXT("Stereo Mix"), TEXT("What U Hear"), TEXT("Steam Streaming"), TEXT("Virtual"), TEXT("CABLE Output")})
+	{
+		if (Name.Contains(Word))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+// Which microphone to capture: the one whose name has `Wanted` in it, or the
+// system's default, unless that isn't a microphone (a game controller's, say),
+// when it's the first that is. INDEX_NONE is the default.
+int32 ChooseDevice(Audio::FAudioCapture& Capture, const FString& Wanted, Audio::FCaptureDeviceInfo& OutInfo)
+{
+	TArray<Audio::FCaptureDeviceInfo> Devices;
+	Capture.GetCaptureDevicesAvailable(Devices);
+	for (int32 Index = 0; Index < Devices.Num(); ++Index)
+	{
+		UE_LOG(LogPipecatMicrophone, Log, TEXT("Microphone %d: %s"), Index, *Devices[Index].DeviceName);
+	}
+	if (!Wanted.IsEmpty())
+	{
+		for (int32 Index = 0; Index < Devices.Num(); ++Index)
+		{
+			if (Devices[Index].DeviceName.Contains(Wanted))
+			{
+				OutInfo = Devices[Index];
+				return Index;
+			}
+		}
+		UE_LOG(LogPipecatMicrophone, Warning, TEXT("No microphone called \"%s\": using the default"), *Wanted);
+	}
+	Audio::FCaptureDeviceInfo Default;
+	if (Capture.GetCaptureDeviceInfo(Default) && IsNotAMicrophone(Default.DeviceName))
+	{
+		for (int32 Index = 0; Index < Devices.Num(); ++Index)
+		{
+			if (!IsNotAMicrophone(Devices[Index].DeviceName))
+			{
+				OutInfo = Devices[Index];
+				return Index;
+			}
+		}
+	}
+	OutInfo = Default;
+	return INDEX_NONE;
+}
+
 class FPipecatMicrophoneAudioCapture : public IPipecatMicrophoneCapture
 {
 public:
@@ -33,13 +88,16 @@ public:
 		Capture.AbortStream();
 	}
 
-	bool Open(int32 InSampleRate)
+	bool Open(int32 InSampleRate, const FString& Device)
 	{
 		SampleRate = InSampleRate;
 
-		// The default microphone, as it captures: 32-bit float, with its own
-		// channels and sample rate.
+		// The microphone, as it captures: 32-bit float, with its own channels
+		// and sample rate, and its own echo cancellation, if it has some.
+		Audio::FCaptureDeviceInfo Info;
 		Audio::FAudioCaptureDeviceParams Params;
+		Params.DeviceIndex = ChooseDevice(Capture, Device, Info);
+		Params.bUseHardwareAEC = Info.bSupportsHardwareAEC;
 		Audio::FOnAudioCaptureFunction OnCaptured = [this](
 			const void* Samples, int32 NumFrames, int32 NumChannels, int32 CaptureSampleRate, double StreamTime, bool bOverflow) {
 			OnCapture(static_cast<const float*>(Samples), NumFrames, NumChannels, CaptureSampleRate);
@@ -51,7 +109,8 @@ public:
 			return false;
 		}
 
-		UE_LOG(LogPipecatMicrophone, Log, TEXT("Microphone started at %d Hz"), SampleRate);
+		UE_LOG(LogPipecatMicrophone, Log, TEXT("Microphone started at %d Hz: %s%s"), SampleRate,
+			Info.DeviceName.IsEmpty() ? TEXT("the default") : *Info.DeviceName, Params.bUseHardwareAEC ? TEXT(", with echo cancellation") : TEXT(""));
 		return true;
 	}
 
@@ -114,10 +173,10 @@ private:
 };
 } // namespace
 
-TUniquePtr<IPipecatMicrophoneCapture> IPipecatMicrophoneCapture::Start(int32 SampleRate, FOnAudio OnAudio)
+TUniquePtr<IPipecatMicrophoneCapture> IPipecatMicrophoneCapture::Start(int32 SampleRate, FOnAudio OnAudio, const FString& Device)
 {
 	TUniquePtr<FPipecatMicrophoneAudioCapture> Capture = MakeUnique<FPipecatMicrophoneAudioCapture>(MoveTemp(OnAudio));
-	if (!Capture->Open(SampleRate))
+	if (!Capture->Open(SampleRate, Device))
 	{
 		return nullptr;
 	}

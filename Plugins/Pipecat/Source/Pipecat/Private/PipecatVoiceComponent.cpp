@@ -138,7 +138,7 @@ public:
 
 	// Captures the microphone, and sends it to the bot whenever it's
 	// connected: as it is, or gated, `GateDelay` seconds late.
-	void StartMicrophone(bool bGate, float GateDelay)
+	void StartMicrophone(bool bGate, float GateDelay, const FString& Device)
 	{
 		if (bGate)
 		{
@@ -169,7 +169,7 @@ public:
 				Gated[i] = static_cast<int16>(Late * Gain);
 			}
 			Client->send_user_audio(Gated.GetData(), NumFrames);
-		});
+		}, Device);
 	}
 
 	void SetMicrophoneOpen(bool bOpen)
@@ -539,7 +539,7 @@ void UPipecatVoiceComponent::BeginPlay()
 	Session = MakeShared<FPipecatSession>(this, ObjectPtrDecay(VoiceWaves), Functions, Transport, VoiceTracks);
 	if (bUseMicrophone)
 	{
-		Session->StartMicrophone(bGateMicrophone, MicrophoneGateDelay);
+		Session->StartMicrophone(bGateMicrophone, MicrophoneGateDelay, MicrophoneDevice);
 	}
 
 	if (bConnectOnBeginPlay)
@@ -595,7 +595,7 @@ void UPipecatVoiceComponent::Connect()
 		Session = MakeShared<FPipecatSession>(this, ObjectPtrDecay(VoiceWaves), Functions, Transport, VoiceTracks);
 		if (bUseMicrophone)
 		{
-			Session->StartMicrophone(bGateMicrophone, MicrophoneGateDelay);
+			Session->StartMicrophone(bGateMicrophone, MicrophoneGateDelay, MicrophoneDevice);
 		}
 	}
 	Session->Start(StartUrl, ApiKey);

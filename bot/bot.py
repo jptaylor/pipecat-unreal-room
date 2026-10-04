@@ -29,6 +29,7 @@ import sys
 import threading
 import uuid
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -228,6 +229,8 @@ async def bot(runner_args: RunnerArguments) -> None:
 
 
 _logging_configured = False
+# The bot's own modules, logged at DEBUG to the log file.
+OUR_MODULES = {"director", "engine", "floor", "room", "space", "cast", "mixer", "__main__"}
 
 
 def configure_logging(*, verbose: bool) -> None:
@@ -248,11 +251,19 @@ def configure_logging(*, verbose: bool) -> None:
         logger.add(sys.stderr, level=level, format=log_format)
     # And to logs/bot.log (BOT_LOG_FILE), a day's at a time, so it can be read afterwards, e.g.
     # from Windows when the bot runs in WSL.
+    # The bot's own modules at DEBUG there, with what's said, and the rest (Pipecat's) as
+    # configured.
     log_file = os.getenv("BOT_LOG_FILE", str(Path(__file__).parent / "logs" / "bot.log"))
     if log_file:
+        threshold = logger.level(level).no
+
+        def ours(record: Any) -> bool:
+            return verbose or record["level"].no >= threshold or record["name"] in OUR_MODULES
+
         logger.add(
             log_file,
-            level="DEBUG" if verbose else level,
+            level="DEBUG",
+            filter=ours,
             format=log_format,
             rotation="1 day",
             retention=7,

@@ -20,8 +20,10 @@ public:
 	// Called on the capture's audio thread.
 	using FOnAudio = TFunction<void(const int16* Frames, int32 NumFrames)>;
 
-	// Starts capturing at the given sample rate, or returns null if it can't.
-	static TUniquePtr<IPipecatMicrophoneCapture> Start(int32 SampleRate, FOnAudio OnAudio);
+	// Starts capturing at the given sample rate, or returns null if it can't:
+	// from the microphone whose name has `Device` in it, or by default the
+	// system's, unless that's a game controller's.
+	static TUniquePtr<IPipecatMicrophoneCapture> Start(int32 SampleRate, FOnAudio OnAudio, const FString& Device);
 
 	// Stops capturing, once OnAudio has returned.
 	virtual ~IPipecatMicrophoneCapture() = default;
@@ -38,7 +40,7 @@ public:
 
 	~FPipecatMicrophone();
 
-	bool Start(int32 SampleRate, FOnAudio InOnAudio);
+	bool Start(int32 SampleRate, FOnAudio InOnAudio, const FString& Device = FString());
 	void Stop();
 
 	// How loud the microphone is, from 0 to 1.

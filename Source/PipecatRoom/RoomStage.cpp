@@ -324,6 +324,8 @@ void ARoomStage::ConnectVoice()
 	}
 	Voice->bUseMicrophone = bUseMicrophone;
 	Voice->bGateMicrophone = bGateMicrophone;
+	Voice->MicrophoneDevice = MicrophoneDevice;
+	FParse::Value(FCommandLine::Get(), TEXT("PipecatMicrophone="), Voice->MicrophoneDevice);
 	Voice->VoiceVolume = VoiceVolume;
 	Voice->VoiceChannels = FMath::Max(Characters.Num(), 1);
 	Voice->VoiceInnerRadius = VoiceFullWithin;

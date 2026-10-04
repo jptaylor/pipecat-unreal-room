@@ -105,6 +105,14 @@ public:
 	UPROPERTY(Config)
 	bool bGateMicrophone = true;
 
+	/**
+	 * The microphone to use: part of its name, e.g. "Yeti". Empty: Windows'
+	 * default, unless that's a game controller's, when it's the first that
+	 * isn't. -PipecatMicrophone= on the command line wins.
+	 */
+	UPROPERTY(Config)
+	FString MicrophoneDevice;
+
 	/** The bot's start endpoint, and its API key, if it needs one. Set before play begins. */
 	FString StartUrl;
 	FString ApiKey;
@@ -184,9 +192,15 @@ private:
 		TWeakObjectPtr<ARoomCharacter> Host;
 		TWeakObjectPtr<ARoomCharacter> Guest;
 		double Since = 0.0;
+		// When the host last set off after the guest.
+		double Walked = 0.0;
 	};
 	TArray<FIntroduction> Introductions;
 	void UpdateIntroductions();
+	// Whether someone's waiting to be introduced to the player: they stay put.
+	bool IsBeingIntroduced(const ARoomCharacter* Character) const;
+	// The host sets off to where the guest is now.
+	void WalkToGuest(FIntroduction& Introduction);
 	void PlayerHolds(ARoomItem* Item);
 	USkeletalMeshComponent* PlayerHand() const;
 	FString Called(const ARoomCharacter* Character) const;

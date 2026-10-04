@@ -97,6 +97,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat", meta = (ClampMin = "0", ClampMax = "1"))
 	float MicrophoneGateDelay = 0.2f;
 
+	/**
+	 * The microphone to use: part of its name, e.g. "Yeti". Empty: the
+	 * system's default, unless that's a game controller's (a DualSense's, say),
+	 * when it's the first that isn't. Set it before play begins.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat")
+	FString MicrophoneDevice;
+
 	/** How many voices the bot sends, each on a channel of its own. Set it before play begins. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pipecat", meta = (ClampMin = "1", ClampMax = "8"))
 	int32 VoiceChannels = 1;

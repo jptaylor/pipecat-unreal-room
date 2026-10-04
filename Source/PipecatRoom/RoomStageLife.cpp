@@ -69,13 +69,15 @@ ARoomStage* FindStage(UWorld* World)
 // E.g. Room.Act juno play, or Room.Interact, or Room.Routine theo.
 FAutoConsoleCommandWithWorldAndArgs ActCommand(
 	TEXT("Room.Act"),
-	TEXT("Has a character do something: dance, play, music_on, music_off, cook, food, flower, water, stop or hand, e.g. Room.Act juno play"),
+	TEXT("Has a character do something (dance, play, music_on, music_off, cook, food, flower, water, stop, hand or introduce), for "
+		 "someone, and in a color, e.g. Room.Act juno play, Room.Act theo food maya, or Room.Act maya flower - yellow"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World) {
 		ARoomStage* Stage = FindStage(World);
 		ARoomCharacter* Character = Stage && Args.Num() > 1 ? Stage->FindCharacter(Args[0]) : nullptr;
 		if (Character)
 		{
-			Stage->Act(Character, Args[1]);
+			ARoomCharacter* For = Args.Num() > 2 ? Stage->FindCharacter(Args[2]) : nullptr;
+			Stage->Act(Character, Args[1], For, Args.Num() > 3 ? Args[3] : FString());
 		}
 	}));
 
@@ -521,11 +523,9 @@ void ARoomStage::Act(ARoomCharacter* Character, const FString& What, ARoomCharac
 	{
 		// Over to whoever the player's to meet, to wait for the player there.
 		Introductions.RemoveAll([Character](const FIntroduction& Each) { return Each.Host == Character; });
-		Introductions.Add({Character, For, Clock});
+		FIntroduction& Introduction = Introductions.Add_GetRef({Character, For, Clock});
 		Character->SetIntent(ERoomIntent::Wait);
-		const FVector Spot = House->FindSpotBy(For->GetActorLocation(), Character->GetActorLocation(), 140.0f);
-		const float Yaw = (For->GetActorLocation() - Spot).Rotation().Yaw;
-		Character->Do({FRoomStep::WalkTo(Spot, Yaw)}, FString::Printf(TEXT("taking the person to meet %s"), *For->GetCast().Name));
+		WalkToGuest(Introduction);
 	}
 	else if (What == TEXT("hand") && Character->GetHeld() && Player)
 	{
@@ -561,12 +561,31 @@ void ARoomStage::Give(ARoomCharacter* Giver, AActor* To)
 	}
 }
 
+void ARoomStage::WalkToGuest(FIntroduction& Introduction)
+{
+	ARoomCharacter* Host = Introduction.Host.Get();
+	ARoomCharacter* Guest = Introduction.Guest.Get();
+	if (!Host || !Guest || !House.IsValid())
+	{
+		return;
+	}
+	Introduction.Walked = Clock;
+	const FVector Spot = House->FindSpotBy(Guest->GetActorLocation(), Host->GetActorLocation(), 140.0f);
+	const float Yaw = (Guest->GetActorLocation() - Spot).Rotation().Yaw;
+	Host->Do({FRoomStep::WalkTo(Spot, Yaw)}, FString::Printf(TEXT("taking the person to meet %s"), *Guest->GetCast().Name));
+}
+
+bool ARoomStage::IsBeingIntroduced(const ARoomCharacter* Character) const
+{
+	return Introductions.ContainsByPredicate([Character](const FIntroduction& Each) { return Each.Guest.Get() == Character; });
+}
+
 void ARoomStage::UpdateIntroductions()
 {
 	const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
 	for (int32 I = Introductions.Num() - 1; I >= 0; --I)
 	{
-		const FIntroduction& Each = Introductions[I];
+		FIntroduction& Each = Introductions[I];
 		ARoomCharacter* Host = Each.Host.Get();
 		ARoomCharacter* Guest = Each.Guest.Get();
 		// Given up on, after a couple of minutes, or if the host's been sent elsewhere.
@@ -579,14 +598,30 @@ void ARoomStage::UpdateIntroductions()
 		{
 			continue;  // still on the way
 		}
+		// The guest's moved on (finished at the piano, say): after them, once
+		// they've stopped.
+		if (FVector::Dist2D(Host->GetActorLocation(), Guest->GetActorLocation()) > 280.0f)
+		{
+			if (Clock - Each.Walked > 1.5 && Guest->GetVelocity().Size2D() < 40.0f)
+			{
+				WalkToGuest(Each);
+			}
+			continue;
+		}
+		// Together, and the player close enough to hear them both.
 		const FVector Head = PlayerHead();
-		const bool bTogether = Reaches(Host->GetHeadLocation(), Guest->GetHeadLocation(), CharacterRange, Host, Guest) &&
-							   Reaches(Host->GetHeadLocation(), Head, CharacterRange, Host, Player) &&
+		const bool bTogether = Reaches(Host->GetHeadLocation(), Head, CharacterRange, Host, Player) &&
 							   Reaches(Guest->GetHeadLocation(), Head, CharacterRange, Guest, Player);
 		if (!bTogether)
 		{
 			continue;
 		}
+		// The guest stops what they're doing, to meet the player.
+		if (Guest->IsBusy())
+		{
+			Guest->StopDoing();
+		}
+		Guest->SetDancing(false);
 		Host->TalkTo(Guest);
 		Guest->LookAt(Host, 6.0f);
 		TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -696,7 +731,7 @@ void ARoomStage::UpdateLife(float DeltaSeconds)
 		const bool bWithPlayer = Player && House.IsValid() && House->AreaAt(Player->GetActorLocation()) == House->AreaAt(Here);
 		const double* Talked = Engaged.Find(Id);
 		const bool bFree = Character->GetIntent() == ERoomIntent::Home && !Character->IsBusy() && !Character->IsDancing() && !bSpeaks &&
-						   !bWithPlayer && (!Talked || Clock - *Talked > 40.0);
+						   !bWithPlayer && (!Talked || Clock - *Talked > 40.0) && !IsBeingIntroduced(Character);
 		if (Clock >= NextRoutine[Id])
 		{
 			NextRoutine[Id] = Clock + FMath::FRandRange(25.0f, 45.0f);
@@ -711,7 +746,12 @@ void ARoomStage::UpdateLife(float DeltaSeconds)
 			TArray<ARoomCharacter*> Hosts;
 			for (ARoomCharacter* Other : Characters)
 			{
-				if (Other != Character && Other->GetIntent() == ERoomIntent::Home && !Other->IsBusy())
+				// Not someone the player's with, or talking to: they'd be interrupted.
+				const double* OtherTalked = Engaged.Find(Other->GetId());
+				const bool bOtherWithPlayer = Player && House.IsValid() &&
+											  House->AreaAt(Player->GetActorLocation()) == House->AreaAt(Other->GetActorLocation());
+				if (Other != Character && Other->GetIntent() == ERoomIntent::Home && !Other->IsBusy() && !bOtherWithPlayer &&
+					(!OtherTalked || Clock - *OtherTalked > 40.0) && !IsBeingIntroduced(Other))
 				{
 					Hosts.Add(Other);
 				}

@@ -21,7 +21,7 @@ FPipecatMicrophone::~FPipecatMicrophone()
 	Stop();
 }
 
-bool FPipecatMicrophone::Start(int32 SampleRate, FOnAudio InOnAudio)
+bool FPipecatMicrophone::Start(int32 SampleRate, FOnAudio InOnAudio, const FString& Device)
 {
 	if (Capture)
 	{
@@ -38,7 +38,7 @@ bool FPipecatMicrophone::Start(int32 SampleRate, FOnAudio InOnAudio)
 	}
 
 	Capture = IPipecatMicrophoneCapture::Start(
-		SampleRate, [this](const int16* Frames, int32 NumFrames) { HandleAudio(Frames, NumFrames); });
+		SampleRate, [this](const int16* Frames, int32 NumFrames) { HandleAudio(Frames, NumFrames); }, Device);
 	return Capture.IsValid();
 }
 

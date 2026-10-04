@@ -81,6 +81,7 @@ class Take:
     note: str | None = None
     to: str | None = None
     act: str | None = None  # what they've been asked to do, as they say it
+    moving: bool = False  # ...or asked to move: follow, come, wait or go somewhere
 
     @property
     def how(self) -> str:

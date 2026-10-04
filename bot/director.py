@@ -113,6 +113,7 @@ from room import (
     Transcript,
     flower_color,
     is_silent,
+    mentions,
     normalize,
     top,
     weigh,
@@ -511,6 +512,10 @@ class Director:
         doing = reading.does(DOING_FLOOR)
         if doing == "dance" and not self._dance_music():
             doing = None  # nothing to dance to yet
+        if doing and not self._free(live.speaker, live.plan):
+            # Doing what the user asked (following them, say), or busy already: what they say
+            # doesn't send them off to do something else.
+            doing = None
         if doing and live.plan.act is None and live.plan.reason not in ("react", "event"):
             logger.info(f"Director: {self.cast[live.speaker].name} sets about {doing}")
             act: dict[str, Any] = {"type": "act", "who": [live.speaker], "action": doing}
@@ -990,6 +995,16 @@ class Director:
         await self._arm_lull()
         await self.play(plan)
 
+    def _free(self, character: str, take: Take) -> bool:
+        """Whether `character` is free to set about something of their own accord: not asked
+        to move or do something this turn, not doing what the user asked (following them, or
+        waiting where they were told), and not busy already."""
+        if take.moving or take.act is not None:
+            return False
+        if self.space.intent.get(character, "home") not in ("", "home"):
+            return False
+        return not self.space.doing.get(character)
+
     def _dance_music(self) -> bool:
         """Whether there's music to dance to: a record on the gramophone in the hall. (Before
         the game says, there's none.)"""
@@ -1024,10 +1039,15 @@ class Director:
         action, area = wants
         if action == "go" and (not area or area not in self.space.areas):
             return None
+        if action == "go" and reading.wants_act(ACT_FLOOR) is not None:
+            # An errand (bringing Maya cake, say) takes them where they need to go, and then
+            # home: not to stay wherever it took them.
+            return None
         if reading.wants_act(ACT_FLOOR) == "introduce":
             return None  # they lead the way to whoever the user's to meet (`_with_act`)
         movers = self._asked(plan, reading)
         for take in plan.takes:
+            take.moving = True
             home = self.space.area_name(self.cast[take.speaker].home)
             text = NOTE_MOVE[GO if action == "go" else action].format(
                 home=home, area=self.space.area_name(area or "")
@@ -1054,6 +1074,14 @@ class Director:
         to = reading.gives_to(FOR_FLOOR) if action in NOTE_ACT_FOR else None
         if to is not None and (to not in self.cast or to == doers[0].speaker):
             to = None
+        if action == "introduce" and to is None:
+            # Jev unsure who: whoever the user named, other than whoever they asked.
+            named = [
+                c
+                for c in self.cast
+                if c != doers[0].speaker and mentions(reading.heard, self.cast[c].name)
+            ]
+            to = named[0] if len(named) == 1 else None
         if action == "introduce" and to is None:
             # Introduced to whom? They ask.
             take = doers[0]
@@ -1170,6 +1198,10 @@ class Director:
             extra += f"; asked: {asked}; chorus {reading.chorus or 0:.2f}"
         if reading.intent:
             extra += "; intent " + ", ".join(f"{k} {v:.2f}" for k, v in reading.intent.items())
+        for name, read in (("move", reading.move), ("act", reading.act), ("for", reading.for_)):
+            best = max(read.items(), key=lambda kv: kv[1], default=None)
+            if best is not None and best[0] not in ("stay", "none", USER):
+                extra += f"; {name} {best[0]} {best[1]:.2f}"
         if reading.raw:
             extra += f" (×{reading.weight:g} for {reading.favoured})"
         if nxt is not None:

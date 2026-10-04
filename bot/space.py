@@ -129,6 +129,10 @@ class Space:
         if within:
             parts[0] += ", with " + _names([self.name(c) for c in within])
         parts[0] += "."
+        away = [self.name(c) for c in self.ids if c != me and c not in within]
+        if away:
+            verb = "isn't" if len(away) == 1 else "aren't"
+            parts.append(f"{_names(away)} {verb} close enough to hear you.")
         if USER in self.hears.get(me, set()):
             where = (
                 "here with you"
@@ -137,7 +141,10 @@ class Space:
             )
             parts.append(f"The person is {where}, close enough to talk to.")
             if me not in self.talked:
-                parts.append("You haven't met the person before.")
+                parts.append(
+                    "You haven't met the person before: if they say hello, say hello back, "
+                    "give your name and ask theirs, in a few words."
+                )
         else:
             parts.append("The person isn't close enough to hear you.")
         intent = self.intent.get(me, "")

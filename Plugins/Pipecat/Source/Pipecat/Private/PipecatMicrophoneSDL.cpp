@@ -84,8 +84,9 @@ private:
 };
 } // namespace
 
-TUniquePtr<IPipecatMicrophoneCapture> IPipecatMicrophoneCapture::Start(int32 SampleRate, FOnAudio OnAudio)
+TUniquePtr<IPipecatMicrophoneCapture> IPipecatMicrophoneCapture::Start(int32 SampleRate, FOnAudio OnAudio, const FString& Device)
 {
+	// SDL captures the system's default microphone.
 	TUniquePtr<FPipecatMicrophoneSDL> Capture = MakeUnique<FPipecatMicrophoneSDL>(MoveTemp(OnAudio));
 	if (!Capture->Open(SampleRate))
 	{

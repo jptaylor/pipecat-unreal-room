@@ -158,6 +158,12 @@ def test_asked_to_introduce_the_user_they_lead_the_way_and_wait(director: Direct
     here = Plan([Take(MAYA, "addressed", None, USER)], why="addressed", addressed=[MAYA])
     director._with_act(here, reading)
     assert "right here" in (here.takes[0].note or "")
+    # Jev unsure who, but the user named her.
+    named = Plan([Take(MAYA, "addressed", None, USER)], why="addressed", addressed=[MAYA])
+    unsure = route(MAYA, act={"introduce": 0.9}, for_={USER: 0.7, JUNO: 0.3})
+    unsure.heard = "Maya, can you introduce me to Juno?"
+    act = director._with_act(named, unsure)
+    assert act is not None and act["to"] == JUNO
     # To whom? They ask.
     whom = Plan([Take(MAYA, "addressed", None, USER)], why="addressed", addressed=[MAYA])
     assert director._with_act(whom, route(MAYA, act={"introduce": 0.9})) is None
@@ -174,6 +180,24 @@ async def test_together_at_last_they_introduce_the_user(
     assert plan.takes[0].speaker == MAYA and plan.takes[0].to == JUNO
     assert "Introduce them to each other" in (plan.takes[0].note or "")
     assert JUNO in director.space.talked  # and now the user has met her
+
+
+def test_doing_what_the_user_asked_their_own_lines_dont_send_them_off(
+    director: Director,
+) -> None:
+    take = Take(MAYA, "addressed", None, USER)
+    assert director._free(MAYA, take)
+    director.space.update(
+        {"characters": {MAYA: {"area": "hall", "hears": [USER], "intent": "follow"}}}
+    )
+    assert not director._free(MAYA, take)  # following the user
+    director.space.update(
+        {"characters": {MAYA: {"area": "hall", "hears": [USER], "doing": "watering the plants"}}}
+    )
+    assert not director._free(MAYA, take)  # busy already
+    director.space.update({"characters": {MAYA: {"area": "hall", "hears": [USER]}}})
+    assert director._free(MAYA, take)
+    assert not director._free(MAYA, Take(MAYA, "addressed", None, USER, moving=True))
 
 
 def test_nobody_does_anything_on_a_turn_they_didnt_hear(director: Director) -> None:

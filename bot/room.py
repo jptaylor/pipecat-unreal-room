@@ -453,7 +453,9 @@ NOTE_INTRODUCE_WHOM = "Ask the person who they'd like to meet."
 # Something that happened in the house: what's said by whoever reacts to it...
 NOTE_EVENT = {
     "gift": "The person has just given you {item}. React to it out loud, in a few words, in character.",
-    "handed": "You've just handed the person {item}. Say something as you do, in a few words.",
+    "handed": (
+        "You've just handed the person {item}. Say something to them as you do, in a few words."
+    ),
     "received": (
         "{who} has just handed you {item}. React to it out loud, in a few words, in character."
     ),
@@ -485,9 +487,9 @@ NOTE_EVENT = {
     ),
     "introduce": (
         "You've brought the person to meet {to}, and you're all together now. Introduce them to "
-        "each other, warmly: tell {to} who the person is (by name, if they've told you it), and "
-        "tell the person who {to} is, with something nice or funny about each. Two or three short "
-        "sentences."
+        "each other, by name, and nothing more: say to {to} who the person is (by name, if "
+        "they've told you it), and to the person who {to} is, in a few words each, like \"Juno, "
+        "meet Sam. Sam, this is Juno, our musician.\" Don't talk about yourself."
     ),
 }
 # ...and what everyone who saw or heard it knows, in the transcript.
@@ -828,6 +830,16 @@ def lull_question(cast: Sequence[Character]) -> ChoiceQuestion:
     )
 
 
+# What else people call the house's rooms, so "the living room" is the hall.
+AREA_ALIASES = {
+    "hall": "the living room, the lounge, the main room, the big room with the columns",
+    "conservatory": "the garden, the greenhouse, the plant room, the room with the fountain",
+    "kitchen": "the dining room, where the food is",
+    "music": "the music room, the stage, where the piano is",
+    "gallery": "the art room, the room with the sculptures and paintings",
+}
+
+
 def move_question(areas: dict[str, str]) -> ChoiceQuestion:
     """Whether the user asks whoever they're talking to to move: come over, follow them, wait,
     go home, or go to one of the house's areas (by id, in `areas`)."""
@@ -857,7 +869,8 @@ def move_question(areas: dict[str, str]) -> ChoiceQuestion:
     }
     for area, name in areas.items():
         options[f"{GO}{area}"] = {
-            "what": f"go to {name}",
+            "what": f"go to {name}"
+            + (f" (also called {AREA_ALIASES[area]})" if area in AREA_ALIASES else ""),
             "examples": [f"Go to {name}", f"Meet me in {name}", f"Wait for me in {name}"],
         }
     return ChoiceQuestion(
@@ -870,6 +883,8 @@ def move_question(areas: dict[str, str]) -> ChoiceQuestion:
                 "Most of what the user says asks nobody to move: `stay`.",
                 "Coming over to the user is `come`; going along with them as they go is `follow`.",
                 "Sending someone back to their own room (`homes`) is `home`.",
+                "Asking someone to fetch, bring or pick something, or to introduce them to "
+                "someone, isn't a move (`stay`): the errand takes them where they need to go.",
             ],
         },
         options=options,
@@ -924,6 +939,8 @@ def for_question(cast: Sequence[Character]) -> ChoiceQuestion:
                 "It's for the user unless they name someone else to give it to.",
                 "Whoever is asked to do it isn't who it's for: 'Theo, give Maya some cake' is for "
                 "Maya.",
+                "Asked to be introduced ('introduce me to Juno', 'can I meet Theo?'), it's whoever "
+                "they want to meet (Juno, Theo), never the user.",
             ],
         },
         options=options,
