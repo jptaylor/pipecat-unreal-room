@@ -6,6 +6,8 @@
 
 #include "RoomHouse.h"
 
+#include "RoomTypes.h"
+
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/PointLightComponent.h"
@@ -134,6 +136,7 @@ void ARoomHouse::BeginPlay()
 	BuildMusicRoom();
 	BuildGallery();
 	BuildOutside();
+	BuildDressing();
 }
 
 void ARoomHouse::AddArea(FName Id, const FString& Name, const FBox2D& Box, float CeilingHeight, const FVector2D& Hub)
@@ -248,6 +251,19 @@ UStaticMeshComponent* ARoomHouse::AddSphere(
 	return AddMesh(Sphere, FTransform(FRotator::ZeroRotator, Center, Radii / 50.0f), Color, Roughness, bCollide);
 }
 
+UStaticMeshComponent* ARoomHouse::BlockCamera(UStaticMeshComponent* Component)
+{
+	// Something people walk past, or under, that the camera stays out of (a
+	// shrub's leaves, say), rather than seeing it from inside.
+	if (Component)
+	{
+		Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Component->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Component->SetCollisionResponseToChannel(ECC_Camera, ECR_Block);
+	}
+	return Component;
+}
+
 UStaticMeshComponent* ARoomHouse::AddLamp(const FVector& Center, float Radius, const FLinearColor& Color, float Glow)
 {
 	UStaticMeshComponent* Lamp = AddSphere(Center, FVector(Radius), Color, 0.4f, false);
@@ -271,6 +287,17 @@ void ARoomHouse::AddWall(
 		if (To - From < 1.0f || Top - Bottom < 1.0f)
 		{
 			return;
+		}
+		if (Proud <= 0.0f)
+		{
+			// The wall itself: each piece a little into the next, and down into
+			// the floor, so no light gets through the seams between them.
+			From -= 1.0f;
+			To += 1.0f;
+			if (Bottom <= 0.0f)
+			{
+				Bottom = -10.0f;
+			}
 		}
 		const float Half = Thickness / 2 + Proud;
 		if (bAlongX)
@@ -356,11 +383,12 @@ void ARoomHouse::AddCeiling(const FBox2D& Box, float Height, const TArray<FBox2D
 	}
 	// Around one hole: strips on either side of it along X, and pieces on
 	// either side of it along Y between them.
+	// (Each a little into the next, so no light gets through the seams.)
 	const FBox2D& Hole = Holes[0];
-	AddBox(FVector(Box.Min.X, Box.Min.Y, Height), FVector(Hole.Min.X, Box.Max.Y, Top), Color);
-	AddBox(FVector(Hole.Max.X, Box.Min.Y, Height), FVector(Box.Max.X, Box.Max.Y, Top), Color);
-	AddBox(FVector(Hole.Min.X, Box.Min.Y, Height), FVector(Hole.Max.X, Hole.Min.Y, Top), Color);
-	AddBox(FVector(Hole.Min.X, Hole.Max.Y, Height), FVector(Hole.Max.X, Box.Max.Y, Top), Color);
+	AddBox(FVector(Box.Min.X, Box.Min.Y, Height), FVector(Hole.Min.X + 1.0f, Box.Max.Y, Top), Color);
+	AddBox(FVector(Hole.Max.X - 1.0f, Box.Min.Y, Height), FVector(Box.Max.X, Box.Max.Y, Top), Color);
+	AddBox(FVector(Hole.Min.X, Box.Min.Y, Height), FVector(Hole.Max.X, Hole.Min.Y + 1.0f, Top), Color);
+	AddBox(FVector(Hole.Min.X, Hole.Max.Y - 1.0f, Height), FVector(Hole.Max.X, Box.Max.Y, Top), Color);
 }
 
 UPointLightComponent* ARoomHouse::AddPointLight(
@@ -537,7 +565,9 @@ void ARoomHouse::BuildHall()
 	const float Top = Height + Wall;
 	// A polished stone floor, and a round rug in the middle.
 	AddBox(FVector(-800.0f, -800.0f, -10.0f), FVector(800.0f, 800.0f, 0.0f), Stone, 0.28f);
+	AddCylinder(FVector(0.0f, 0.0f, 0.0f), 345.0f, 0.8f, Srgb(226, 200, 160), 0.9f, false);
 	AddCylinder(FVector(0.0f, 0.0f, 0.0f), 330.0f, 1.2f, Srgb(184, 134, 120), 0.9f, false);
+	AddCylinder(FVector(0.0f, 0.0f, 0.0f), 150.0f, 1.6f, Srgb(206, 166, 140), 0.9f, false);
 
 	// Stone-gray below a rail, white above, dark skirting, white frames.
 	Style = {Srgb(168, 164, 158), 120.0f, Skirting, Srgb(244, 242, 238)};
@@ -557,10 +587,10 @@ void ARoomHouse::BuildHall()
 	// A skylight in the middle, with a deep well around it.
 	const FBox2D Skylight(FVector2D(-260.0f, -260.0f), FVector2D(260.0f, 260.0f));
 	AddCeiling(FBox2D(FVector2D(-820.0f, -820.0f), FVector2D(820.0f, 820.0f)), Height, {Skylight}, Ceiling);
-	AddBox(FVector(-280.0f, -280.0f, Height + 30.0f), FVector(280.0f, -260.0f, Height + 160.0f), Ceiling);
-	AddBox(FVector(-280.0f, 260.0f, Height + 30.0f), FVector(280.0f, 280.0f, Height + 160.0f), Ceiling);
-	AddBox(FVector(-280.0f, -260.0f, Height + 30.0f), FVector(-260.0f, 260.0f, Height + 160.0f), Ceiling);
-	AddBox(FVector(260.0f, -260.0f, Height + 30.0f), FVector(280.0f, 260.0f, Height + 160.0f), Ceiling);
+	AddBox(FVector(-280.0f, -280.0f, Height + 20.0f), FVector(280.0f, -260.0f, Height + 160.0f), Ceiling);
+	AddBox(FVector(-280.0f, 260.0f, Height + 20.0f), FVector(280.0f, 280.0f, Height + 160.0f), Ceiling);
+	AddBox(FVector(-280.0f, -280.0f, Height + 20.0f), FVector(-260.0f, 280.0f, Height + 160.0f), Ceiling);
+	AddBox(FVector(260.0f, -280.0f, Height + 20.0f), FVector(280.0f, 280.0f, Height + 160.0f), Ceiling);
 
 	// Columns, clear of the paths between the doorways.
 	for (float X : {-480.0f, 480.0f})
@@ -572,15 +602,11 @@ void ARoomHouse::BuildHall()
 		}
 	}
 
-	// Benches along the walls, and big potted shrubs in the corners.
-	for (float Y : {-720.0f, 720.0f})
-	{
-		AddBox(FVector(-600.0f, Y - 30.0f, 0.0f), FVector(-340.0f, Y + 30.0f, 44.0f), Srgb(150, 112, 86), 0.55f);
-	}
+	// Big potted shrubs in the corners (the sofas are in BuildDressing).
 	for (float Y : {-660.0f, 660.0f})
 	{
 		AddCylinder(FVector(660.0f, Y, 0.0f), 48.0f, 62.0f, Srgb(176, 110, 82), 0.7f);
-		AddSphere(FVector(660.0f, Y, 140.0f), FVector(80.0f, 80.0f, 95.0f), Leaf, 0.85f, false);
+		BlockCamera(AddSphere(FVector(660.0f, Y, 140.0f), FVector(80.0f, 80.0f, 95.0f), Leaf, 0.85f, false));
 	}
 
 	// Two lamps hanging from the ceiling on long cords, swinging gently.
@@ -673,6 +699,7 @@ void ARoomHouse::BuildConservatory()
 					 AddSphere(FVector(X + 40.0f, Y - 30.0f, 70.0f + Tall + 120.0f), FVector(78.0f), LeafDark, 0.85f, false)})
 			{
 				Canopy->SetMobility(EComponentMobility::Movable);
+				BlockCamera(Canopy);
 				Canopies.Add(Canopy);
 				CanopySizes.Add(Canopy->GetRelativeScale3D());
 			}
@@ -701,7 +728,8 @@ void ARoomHouse::BuildKitchen()
 	AddWall(FVector2D(-620.0f, -2000.0f), FVector2D(620.0f, -2000.0f), Top, {{620.0f, 420.0f, 100.0f, 330.0f}}, Cream);
 	AddWall(FVector2D(600.0f, -2020.0f), FVector2D(600.0f, -800.0f), Top, {{620.0f, 300.0f, 100.0f, 330.0f}}, Cream);
 	AddWall(FVector2D(-600.0f, -2020.0f), FVector2D(-600.0f, -800.0f), Top, {}, Cream);
-	AddCeiling(FBox2D(FVector2D(-620.0f, -2020.0f), FVector2D(620.0f, -780.0f)), Height, {}, Ceiling);
+	// To the middle of the hall's wall: no further, or its edge shows on the hall's side.
+	AddCeiling(FBox2D(FVector2D(-620.0f, -2020.0f), FVector2D(620.0f, -800.0f)), Height, {}, Ceiling);
 
 	// Counters under the window, and cupboards either side of it.
 	const FLinearColor Terracotta = Srgb(186, 112, 88);
@@ -748,7 +776,8 @@ void ARoomHouse::BuildMusicRoom()
 		{{320.0f, 220.0f, 90.0f, 400.0f}, {920.0f, 220.0f, 90.0f, 400.0f}}, Indigo);
 	AddWall(FVector2D(600.0f, 800.0f), FVector2D(600.0f, 2020.0f), Top, {{500.0f, 300.0f, 90.0f, 400.0f}}, Indigo);
 	AddWall(FVector2D(-600.0f, 800.0f), FVector2D(-600.0f, 2020.0f), Top, {}, Indigo);
-	AddCeiling(FBox2D(FVector2D(-620.0f, 780.0f), FVector2D(620.0f, 2020.0f)), Height, {}, Srgb(196, 198, 214));
+	// To the middle of the hall's wall: no further, or its edge shows on the hall's side.
+	AddCeiling(FBox2D(FVector2D(-620.0f, 800.0f), FVector2D(620.0f, 2020.0f)), Height, {}, Srgb(196, 198, 214));
 
 	// A low stage, speakers, and a piano with its bench.
 	const FLinearColor Black = Srgb(30, 30, 34);
@@ -811,7 +840,8 @@ void ARoomHouse::BuildGallery()
 		AddWall(FVector2D(-2220.0f, Y), FVector2D(-780.0f, Y), Top,
 			{{320.0f, 220.0f, 380.0f, 560.0f}, {720.0f, 220.0f, 380.0f, 560.0f}, {1120.0f, 220.0f, 380.0f, 560.0f}}, White);
 	}
-	AddCeiling(FBox2D(FVector2D(-2220.0f, -720.0f), FVector2D(-780.0f, 720.0f)), Height, {}, Ceiling);
+	// To the middle of the hall's wall: no further, or its edge shows on the hall's side.
+	AddCeiling(FBox2D(FVector2D(-2220.0f, -720.0f), FVector2D(-800.0f, 720.0f)), Height, {}, Ceiling);
 
 	// Plinths with sculptures, each under its own light, and a bench.
 	const FLinearColor Colors[] = {
@@ -858,6 +888,307 @@ void ARoomHouse::BuildGallery()
 	AddPicture(FVector(-1300.0f, -678.0f, 230.0f), FVector(0.0f, 1.0f, 0.0f), 180.0f, 220.0f, Canvases[1]);
 	AddPicture(FVector(-1700.0f, 678.0f, 230.0f), FVector(0.0f, -1.0f, 0.0f), 180.0f, 220.0f, Canvases[2]);
 	AddPicture(FVector(-1300.0f, 678.0f, 230.0f), FVector(0.0f, -1.0f, 0.0f), 260.0f, 170.0f, Canvases[3]);
+}
+
+//
+// Furnishings: what makes it a place to hang out
+//
+
+UStaticMeshComponent* ARoomHouse::AddBlock(
+	const FVector& Center, const FVector& Size, float Yaw, const FLinearColor& Color, float Roughness, bool bCollide)
+{
+	return AddMesh(Cube, FTransform(FRotator(0.0f, Yaw, 0.0f), Center, Size / 100.0f), Color, Roughness, bCollide);
+}
+
+void ARoomHouse::AddSofa(const FVector& Center, float Yaw, float Width, const FLinearColor& Color, const FLinearColor& Cushion)
+{
+	// Facing along Yaw: a seat, a back behind it, arms either end, cushions
+	// on the seat, and a couple of pillows against the back.
+	const FRotator Facing(0.0f, Yaw, 0.0f);
+	auto At = [&](float Ahead, float Right, float Up) { return Center + Facing.RotateVector(FVector(Ahead, Right, Up)); };
+	const float Depth = 90.0f;
+	AddBlock(At(0.0f, 0.0f, 20.0f), FVector(Depth, Width, 40.0f), Yaw, Color, 0.9f);
+	AddBlock(At(-Depth / 2 + 11.0f, 0.0f, 50.0f), FVector(22.0f, Width, 100.0f), Yaw, Color, 0.9f);
+	for (float Side : {-1.0f, 1.0f})
+	{
+		AddBlock(At(0.0f, Side * (Width / 2 - 11.0f), 31.0f), FVector(Depth, 22.0f, 62.0f), Yaw, Color, 0.9f);
+	}
+	const int32 Seats = Width > 200.0f ? 3 : 2;
+	const float Seat = (Width - 44.0f) / Seats;
+	for (int32 I = 0; I < Seats; ++I)
+	{
+		const float Right = -Width / 2 + 22.0f + Seat * (I + 0.5f);
+		AddBlock(At(8.0f, Right, 46.0f), FVector(Depth - 26.0f, Seat - 3.0f, 12.0f), Yaw, Cushion, 0.95f, false);
+	}
+	for (float Side : {-1.0f, 1.0f})
+	{
+		AddMesh(Cube,
+			FTransform(FRotator(0.0f, Yaw, 0.0f) + FRotator(-20.0f, 0.0f, Side * 12.0f), At(-22.0f, Side * (Width / 2 - 52.0f), 70.0f),
+				FVector(0.12f, 0.42f, 0.42f)),
+			Side > 0.0f ? Srgb(236, 200, 120) : Srgb(120, 156, 170), 0.95f, false);
+	}
+}
+
+void ARoomHouse::AddTableLamp(const FVector& Base, const FLinearColor& Shade, float Bright)
+{
+	AddCylinder(Base, 9.0f, 3.0f, Srgb(60, 52, 46), 0.4f, false);
+	AddCylinder(Base, 1.5f, 40.0f, Srgb(184, 150, 96), 0.3f, false);
+	UStaticMeshComponent* Lampshade = AddCylinder(Base + FVector(0.0f, 0.0f, 34.0f), 17.0f, 22.0f, Shade, 0.7f, false);
+	Lampshade->SetMaterial(0, GetMaterial(Shade, 0.7f, 18.0f, Shade));
+	Lampshade->SetCastShadow(false);
+	AddPointLight(Base + FVector(0.0f, 0.0f, 44.0f), Warm(2600.0f), Bright, 650.0f, 9.0f);
+}
+
+void ARoomHouse::AddFloorLamp(const FVector& Base)
+{
+	AddCylinder(Base, 16.0f, 3.0f, Srgb(40, 40, 44), 0.4f);
+	AddCylinder(Base, 2.0f, 150.0f, Srgb(40, 40, 44), 0.4f, false);
+	const FLinearColor Shade = Srgb(250, 232, 200);
+	UStaticMeshComponent* Lampshade = AddCylinder(Base + FVector(0.0f, 0.0f, 140.0f), 24.0f, 30.0f, Shade, 0.7f, false);
+	Lampshade->SetMaterial(0, GetMaterial(Shade, 0.7f, 16.0f, Shade));
+	Lampshade->SetCastShadow(false);
+	AddPointLight(Base + FVector(0.0f, 0.0f, 152.0f), Warm(2700.0f), 30.0f, 900.0f, 12.0f);
+}
+
+void ARoomHouse::AddSideTable(const FVector& Base, float Size, float Height, const FLinearColor& Color)
+{
+	AddCylinder(Base, Size * 0.18f, Height - 4.0f, Color, 0.5f);
+	AddCylinder(Base + FVector(0.0f, 0.0f, Height - 4.0f), Size * 0.5f, 4.0f, Color, 0.35f);
+}
+
+void ARoomHouse::AddPottedPlant(const FVector& Base, float Scale, const FLinearColor& Pot)
+{
+	// A pot, and a bushy plant of a few leafy balls, which the camera stays
+	// out of.
+	AddCylinder(Base, 26.0f * Scale, 42.0f * Scale, Pot, 0.7f);
+	AddCylinder(Base + FVector(0.0f, 0.0f, 42.0f * Scale), 23.0f * Scale, 2.0f, Srgb(70, 54, 44), 0.95f, false);
+	const FVector Leaves[] = {
+		{0.0f, 0.0f, 95.0f}, {-18.0f, 12.0f, 130.0f}, {16.0f, -10.0f, 150.0f}, {6.0f, 18.0f, 175.0f},
+	};
+	const FLinearColor Greens[] = {Srgb(84, 140, 76), Srgb(66, 120, 72), Srgb(110, 158, 90), Srgb(76, 132, 82)};
+	for (int32 I = 0; I < UE_ARRAY_COUNT(Leaves); ++I)
+	{
+		const float Size = (I == 0 ? 48.0f : 34.0f - 4.0f * I) * Scale;
+		BlockCamera(AddSphere(Base + Leaves[I] * Scale, FVector(Size, Size, Size * 0.9f), Greens[I], 0.85f, false));
+	}
+}
+
+void ARoomHouse::AddRug(const FVector& Center, const FVector2D& Size, float Yaw, const FLinearColor& Color, const FLinearColor& Border)
+{
+	AddMesh(Cube, FTransform(FRotator(0.0f, Yaw, 0.0f), Center + FVector(0.0f, 0.0f, 0.4f), FVector(Size.X / 100.0f, Size.Y / 100.0f, 0.008f)),
+		Border, 0.95f, false);
+	AddMesh(Cube,
+		FTransform(FRotator(0.0f, Yaw, 0.0f), Center + FVector(0.0f, 0.0f, 0.9f),
+			FVector((Size.X - 24.0f) / 100.0f, (Size.Y - 24.0f) / 100.0f, 0.008f)),
+		Color, 0.95f, false);
+}
+
+void ARoomHouse::AddSconce(const FVector& At, const FVector& Facing)
+{
+	// A brass plate on the wall, and a glowing globe off it.
+	AddMesh(Cube, FTransform(Facing.Rotation(), At, FVector(0.04f, 0.16f, 0.26f)), Srgb(184, 150, 96), 0.3f, false);
+	AddLamp(At + Facing * 14.0f + FVector(0.0f, 0.0f, 6.0f), 9.0f, Srgb(255, 226, 186), 30.0f);
+	AddPointLight(At + Facing * 26.0f + FVector(0.0f, 0.0f, 6.0f), Warm(2700.0f), 26.0f, 800.0f, 8.0f);
+}
+
+void ARoomHouse::AddFruitBowl(const FVector& At)
+{
+	AddMesh(Sphere, FTransform(FRotator::ZeroRotator, At + FVector(0.0f, 0.0f, 5.0f), FVector(0.3f, 0.3f, 0.12f)), Srgb(236, 232, 222), 0.3f, false);
+	const FLinearColor Fruit[] = {Srgb(214, 46, 36), Srgb(246, 196, 64), Srgb(250, 130, 70), Srgb(120, 170, 70)};
+	for (int32 I = 0; I < 4; ++I)
+	{
+		const FVector Offset = FRotator(0.0f, 90.0f * I + 20.0f, 0.0f).Vector() * 7.0f;
+		AddSphere(At + Offset + FVector(0.0f, 0.0f, 12.0f), FVector(5.5f), Fruit[I], 0.45f, false);
+	}
+}
+
+void ARoomHouse::AddBooks(const FVector& At, float Yaw, int32 Count, int32 Seed)
+{
+	// A stack, each a little turned.
+	FRandomStream Random(Seed);
+	const FLinearColor Covers[] = {Srgb(170, 60, 60), Srgb(60, 90, 140), Srgb(226, 196, 120), Srgb(70, 120, 90), Srgb(236, 230, 214)};
+	float Z = 0.0f;
+	for (int32 I = 0; I < Count; ++I)
+	{
+		const float Thick = Random.FRandRange(3.0f, 5.0f);
+		AddMesh(Cube,
+			FTransform(FRotator(0.0f, Yaw + Random.FRandRange(-12.0f, 12.0f), 0.0f), At + FVector(0.0f, 0.0f, Z + Thick / 2),
+				FVector(Random.FRandRange(0.2f, 0.26f), Random.FRandRange(0.15f, 0.18f), Thick / 100.0f)),
+			Covers[Random.RandRange(0, UE_ARRAY_COUNT(Covers) - 1)], 0.8f, false);
+		Z += Thick;
+	}
+}
+
+void ARoomHouse::AddStringLights(const FVector& From, const FVector& To, float Sag, int32 Count)
+{
+	// Little glowing bulbs along a sagging line, in warm colors.
+	const FLinearColor Bulbs[] = {Srgb(255, 214, 150), Srgb(255, 180, 120), Srgb(255, 236, 190)};
+	for (int32 I = 0; I <= Count; ++I)
+	{
+		const float T = static_cast<float>(I) / Count;
+		const FVector At = FMath::Lerp(From, To, T) - FVector(0.0f, 0.0f, Sag * 4.0f * T * (1.0f - T));
+		UStaticMeshComponent* Bulb = AddSphere(At, FVector(3.0f), Bulbs[I % 3], 0.4f, false);
+		Bulb->SetMaterial(0, GetMaterial(Bulbs[I % 3], 0.4f, 40.0f, Bulbs[I % 3]));
+		Bulb->SetCastShadow(false);
+	}
+}
+
+void ARoomHouse::BuildDressing()
+{
+	const FLinearColor Wood = Srgb(150, 112, 86);
+	const FLinearColor DarkWood = Srgb(96, 68, 52);
+
+	//
+	// The hall: somewhere to sit, lamps, plants, beams.
+	//
+
+	// Two sofas along the walls either side of the gallery doorway, each with
+	// a rug, a coffee table and lamps on side tables.
+	for (float Side : {-1.0f, 1.0f})
+	{
+		const float Y = Side * 715.0f;
+		AddRug(FVector(-470.0f, Side * 630.0f, 0.0f), FVector2D(330.0f, 200.0f), 0.0f, Srgb(176, 82, 64), Srgb(226, 196, 150));
+		AddSofa(FVector(-470.0f, Y, 0.0f), Side > 0.0f ? -90.0f : 90.0f, 250.0f, Srgb(70, 104, 120), Srgb(92, 130, 146));
+		AddBlock(FVector(-470.0f, Side * 588.0f, 34.0f), FVector(120.0f, 56.0f, 6.0f), 0.0f, DarkWood, 0.4f);
+		for (float X : {-520.0f, -420.0f})
+		{
+			AddBlock(FVector(X, Side * 588.0f, 15.5f), FVector(8.0f, 44.0f, 31.0f), 0.0f, DarkWood, 0.4f);
+		}
+		AddBooks(FVector(-500.0f, Side * 588.0f, 37.0f), 10.0f, 3, Side > 0.0f ? 3 : 7);
+		AddFruitBowl(FVector(-440.0f, Side * 590.0f, 37.0f));
+		for (float X : {-640.0f, -300.0f})
+		{
+			AddSideTable(FVector(X, Y, 0.0f), 50.0f, 56.0f, Wood);
+			AddTableLamp(FVector(X, Y, 56.0f), Side > 0.0f ? Srgb(250, 226, 190) : Srgb(246, 214, 176), 18.0f);
+		}
+	}
+
+	// Sideboards under the paintings by the kitchen and music room doors, with
+	// a vase of flowers and a lamp on each.
+	for (float Side : {-1.0f, 1.0f})
+	{
+		const FVector At(450.0f, Side * 756.0f, 0.0f);
+		AddBlock(At + FVector(0.0f, 0.0f, 38.0f), FVector(190.0f, 44.0f, 76.0f), 0.0f, DarkWood, 0.45f);
+		AddBlock(At + FVector(0.0f, 0.0f, 78.0f), FVector(196.0f, 48.0f, 4.0f), 0.0f, Wood, 0.35f);
+		for (float X : {-48.0f, 48.0f})
+		{
+			AddBlock(At + FVector(X, -Side * 22.5f, 38.0f), FVector(90.0f, 1.0f, 64.0f), 0.0f, Srgb(120, 86, 64), 0.5f, false);
+		}
+		AddCylinder(At + FVector(-55.0f, 0.0f, 80.0f), 9.0f, 30.0f, Srgb(70, 110, 140), 0.25f, false);
+		for (int32 I = 0; I < 5; ++I)
+		{
+			const FVector Petal = FRotator(0.0f, 72.0f * I, 0.0f).Vector() * 7.0f + FVector(0.0f, 0.0f, 118.0f + 4.0f * (I % 2));
+			AddSphere(At + FVector(-55.0f, 0.0f, 0.0f) + Petal, FVector(6.0f), RoomTypes::Blooms()[I % 6].Color, 0.5f, false);
+		}
+		AddTableLamp(At + FVector(60.0f, 0.0f, 80.0f), Srgb(250, 230, 196), 16.0f);
+	}
+
+	// Palms by the gallery doorway, floor lamps by the conservatory's.
+	for (float Side : {-1.0f, 1.0f})
+	{
+		AddPottedPlant(FVector(-735.0f, Side * 250.0f, 0.0f), 1.15f, Srgb(176, 110, 82));
+		AddFloorLamp(FVector(735.0f, Side * 290.0f, 0.0f));
+	}
+
+	// Sconces on the walls either side of the doorways to the gallery and the
+	// conservatory.
+	for (float Y : {-470.0f, 470.0f})
+	{
+		AddSconce(FVector(-778.0f, Y, 270.0f), FVector(1.0f, 0.0f, 0.0f));
+		AddSconce(FVector(778.0f, Y, 270.0f), FVector(-1.0f, 0.0f, 0.0f));
+	}
+
+	// Beams across the ceiling, resting on the columns, and a cornice where
+	// the walls meet it.
+	const FLinearColor Beam = Srgb(226, 222, 214);
+	for (float At : {-480.0f, 480.0f})
+	{
+		AddBox(FVector(-780.0f, At - 18.0f, 862.0f), FVector(780.0f, At + 18.0f, 901.0f), Beam, 0.6f, false);
+		AddBox(FVector(At - 18.0f, -780.0f, 862.0f), FVector(At + 18.0f, 780.0f, 901.0f), Beam, 0.6f, false);
+	}
+	const FLinearColor Cornice = Srgb(240, 238, 232);
+	AddBox(FVector(-781.0f, 766.0f, 868.0f), FVector(781.0f, 781.0f, 901.0f), Cornice, 0.55f, false);
+	AddBox(FVector(-781.0f, -781.0f, 868.0f), FVector(781.0f, -766.0f, 901.0f), Cornice, 0.55f, false);
+	AddBox(FVector(766.0f, -781.0f, 868.0f), FVector(781.0f, 781.0f, 901.0f), Cornice, 0.55f, false);
+	AddBox(FVector(-781.0f, -781.0f, 868.0f), FVector(-766.0f, 781.0f, 901.0f), Cornice, 0.55f, false);
+
+	//
+	// The kitchen: stools at the island, fruit, jars, herbs on the sill.
+	//
+
+	for (float X : {-90.0f, 90.0f})
+	{
+		AddCylinder(FVector(X, -1622.0f, 0.0f), 3.0f, 68.0f, Srgb(50, 50, 54), 0.4f, false);
+		AddCylinder(FVector(X, -1622.0f, 0.0f), 16.0f, 2.0f, Srgb(50, 50, 54), 0.4f);
+		AddCylinder(FVector(X, -1622.0f, 68.0f), 19.0f, 6.0f, Srgb(232, 196, 116), 0.6f);
+	}
+	AddFruitBowl(FVector(110.0f, -1500.0f, 95.0f));
+	const FLinearColor Jars[] = {Srgb(214, 120, 92), Srgb(236, 214, 150), Srgb(120, 156, 120)};
+	for (int32 I = 0; I < 3; ++I)
+	{
+		const FVector At(-480.0f + 30.0f * I, -1946.0f, 95.0f);
+		AddCylinder(At, 9.0f, 22.0f - 4.0f * I, Jars[I], 0.3f, false);
+		AddCylinder(At + FVector(0.0f, 0.0f, 22.0f - 4.0f * I), 9.5f, 3.0f, Srgb(150, 112, 86), 0.5f, false);
+	}
+	AddCylinder(FVector(480.0f, -1945.0f, 95.0f), 11.0f, 20.0f, Srgb(196, 60, 52), 0.3f, false);
+	AddSphere(FVector(480.0f, -1945.0f, 117.0f), FVector(9.0f, 9.0f, 5.0f), Srgb(196, 60, 52), 0.3f, false);
+	for (float X : {-150.0f, 0.0f, 150.0f})
+	{
+		AddCylinder(FVector(X, -1955.0f, 95.0f), 8.0f, 12.0f, Srgb(186, 112, 88), 0.7f, false);
+		AddSphere(FVector(X, -1955.0f, 114.0f), FVector(11.0f, 11.0f, 9.0f), Srgb(96, 150, 80), 0.85f, false);
+	}
+	AddRug(FVector(-380.0f, -1055.0f, 0.0f), FVector2D(300.0f, 260.0f), 0.0f, Srgb(206, 176, 120), Srgb(150, 96, 72));
+
+	//
+	// The music room: a rug, a drum kit and a microphone on the stage, and
+	// beanbags.
+	//
+
+	AddRug(FVector(0.0f, 1380.0f, 0.0f), FVector2D(480.0f, 300.0f), 0.0f, Srgb(112, 46, 56), Srgb(176, 142, 96));
+	const FVector Kit(300.0f, 1850.0f, 25.0f);
+	AddMesh(Cylinder, FTransform(FRotator(0.0f, 0.0f, 90.0f), Kit + FVector(0.0f, 0.0f, 30.0f), FVector(0.6f, 0.6f, 0.4f)), Srgb(200, 50, 60), 0.4f);
+	AddMesh(Cylinder, FTransform(FRotator(0.0f, 0.0f, 90.0f), Kit + FVector(0.0f, 0.0f, 30.0f), FVector(0.56f, 0.56f, 0.42f)), Srgb(236, 232, 222), 0.5f, false);
+	for (const FVector& Drum : {FVector(-40.0f, -35.0f, 55.0f), FVector(25.0f, -38.0f, 70.0f), FVector(-55.0f, 20.0f, 50.0f)})
+	{
+		AddCylinder(Kit + Drum - FVector(0.0f, 0.0f, 16.0f), 15.0f, 16.0f, Srgb(200, 50, 60), 0.4f, false);
+		AddCylinder(Kit + Drum - FVector(0.0f, 0.0f, Drum.Z), 1.0f, Drum.Z - 16.0f, Srgb(180, 180, 186), 0.3f, false);
+	}
+	AddCylinder(Kit + FVector(60.0f, 10.0f, 0.0f), 1.0f, 110.0f, Srgb(180, 180, 186), 0.3f, false);
+	AddCylinder(Kit + FVector(60.0f, 10.0f, 110.0f), 24.0f, 1.0f, Srgb(214, 172, 72), 0.25f, false);
+	AddCylinder(FVector(-60.0f, 1800.0f, 25.0f), 12.0f, 2.0f, Srgb(40, 40, 44), 0.4f, false);
+	AddCylinder(FVector(-60.0f, 1800.0f, 25.0f), 1.0f, 140.0f, Srgb(40, 40, 44), 0.4f, false);
+	AddSphere(FVector(-60.0f, 1800.0f, 170.0f), FVector(4.5f), Srgb(60, 60, 64), 0.3f, false);
+	AddSphere(FVector(400.0f, 1060.0f, 22.0f), FVector(48.0f, 48.0f, 26.0f), Srgb(232, 176, 80), 0.95f);
+	AddSphere(FVector(470.0f, 1190.0f, 22.0f), FVector(44.0f, 44.0f, 24.0f), Srgb(96, 150, 170), 0.95f);
+
+	//
+	// The conservatory: a bench by the glass, flowers hanging from the roof,
+	// and strings of lights.
+	//
+
+	AddBlock(FVector(2110.0f, 0.0f, 22.0f), FVector(56.0f, 220.0f, 8.0f), 0.0f, Wood, 0.55f);
+	for (float Y : {-90.0f, 90.0f})
+	{
+		AddBlock(FVector(2110.0f, Y, 9.0f), FVector(50.0f, 8.0f, 18.0f), 0.0f, DarkWood, 0.5f);
+	}
+	for (const FVector& At : {FVector(1100.0f, -250.0f, 0.0f), FVector(1100.0f, 250.0f, 0.0f), FVector(1950.0f, 0.0f, 0.0f)})
+	{
+		AddBox(At + FVector(-0.6f, -0.6f, 440.0f), At + FVector(0.6f, 0.6f, 700.0f), Charcoal, 0.5f, false);
+		AddSphere(At + FVector(0.0f, 0.0f, 420.0f), FVector(26.0f, 26.0f, 20.0f), Srgb(150, 112, 86), 0.8f, false);
+		for (int32 I = 0; I < 6; ++I)
+		{
+			const FVector Flower = FRotator(0.0f, 60.0f * I, 0.0f).Vector() * 20.0f + FVector(0.0f, 0.0f, 430.0f - 12.0f * (I % 2));
+			AddSphere(At + Flower, FVector(10.0f), I % 2 ? Srgb(110, 158, 90) : RoomTypes::Blooms()[(I / 2) % 6].Color, 0.6f, false);
+		}
+	}
+	AddStringLights(FVector(820.0f, -700.0f, 560.0f), FVector(2180.0f, -700.0f, 560.0f), 60.0f, 28);
+	AddStringLights(FVector(820.0f, 700.0f, 560.0f), FVector(2180.0f, 700.0f, 560.0f), 60.0f, 28);
+
+	//
+	// The gallery: a runner down the middle.
+	//
+
+	AddRug(FVector(-1500.0f, 0.0f, 0.0f), FVector2D(1000.0f, 150.0f), 0.0f, Srgb(60, 64, 80), Srgb(150, 140, 120));
 }
 
 //

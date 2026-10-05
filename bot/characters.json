@@ -11,6 +11,7 @@
     "voiceName": "Skylar",
     "body": "quinn",
     "home": "conservatory",
+    "art": 2,
     "height": 0.97,
     "place": "the conservatory"
   },
@@ -26,6 +27,7 @@
     "voiceName": "Archie",
     "body": "manny",
     "home": "kitchen",
+    "art": 1,
     "height": 1.02,
     "place": "the kitchen"
   },
@@ -41,6 +43,7 @@
     "voiceName": "Bronte",
     "body": "quinn",
     "home": "music",
+    "art": 0,
     "height": 1.0,
     "place": "the music room"
   }

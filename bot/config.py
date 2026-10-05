@@ -147,6 +147,7 @@ class Character:
     colour: str  # their favourite colour (and their color in the game)
     home: str = ""  # the area of the house they live in, e.g. "kitchen"...
     place: str = ""  # ...and what it's called, e.g. "the kitchen"
+    art: int = -1  # their favourite of the gallery's sculptures (room.SCULPTURES), -1: none
 
     def brief(self) -> str:
         return f"{self.name}, the {self.role.lower()}: {self.tagline}"
@@ -161,6 +162,7 @@ def load_cast(source: Path | None = None) -> tuple[Character, ...]:
             **{k: entry[k] for k in fields},
             home=entry.get("home", ""),
             place=entry.get("place", ""),
+            art=int(entry.get("art", -1)),
         )
         for entry in json.loads((source or HERE / "characters.json").read_text(encoding="utf-8"))
     )

@@ -129,6 +129,8 @@ private:
 	UStaticMeshComponent* AddSphere(const FVector& Center, const FVector& Radii, const FLinearColor& Color,
 		float Roughness = 0.65f, bool bCollide = true);
 	UStaticMeshComponent* AddLamp(const FVector& Center, float Radius, const FLinearColor& Color, float Glow);
+	// The camera stays out of it, though people don't bump into it.
+	UStaticMeshComponent* BlockCamera(UStaticMeshComponent* Component);
 
 	// A wall along X (bAlongX) or along Y, from A to B, with openings, each
 	// along it (from its start), how wide, and from and to how high.
@@ -170,6 +172,20 @@ private:
 	void BuildMusicRoom();
 	void BuildGallery();
 	void BuildOutside();
+	// Furnishings: sofas, lamps, plants, rugs and the like, in every room.
+	void BuildDressing();
+	UStaticMeshComponent* AddBlock(const FVector& Center, const FVector& Size, float Yaw, const FLinearColor& Color,
+		float Roughness = 0.65f, bool bCollide = true);
+	void AddSofa(const FVector& Center, float Yaw, float Width, const FLinearColor& Color, const FLinearColor& Cushion);
+	void AddTableLamp(const FVector& Base, const FLinearColor& Shade, float Bright);
+	void AddFloorLamp(const FVector& Base);
+	void AddSideTable(const FVector& Base, float Size, float Height, const FLinearColor& Color);
+	void AddPottedPlant(const FVector& Base, float Scale, const FLinearColor& Pot);
+	void AddRug(const FVector& Center, const FVector2D& Size, float Yaw, const FLinearColor& Color, const FLinearColor& Border);
+	void AddSconce(const FVector& At, const FVector& Facing);
+	void AddFruitBowl(const FVector& At);
+	void AddBooks(const FVector& At, float Yaw, int32 Count, int32 Seed);
+	void AddStringLights(const FVector& From, const FVector& To, float Sag, int32 Count);
 
 	// The way through the doorways alone, and around the furniture in a room.
 	void FindDoorways(const FVector& From, const FVector& To, TArray<FVector>& OutPath) const;

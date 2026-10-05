@@ -106,4 +106,6 @@ struct FRoomCast
 	FName Home;
 	// How tall they are, compared to the mannequin.
 	float Height = 1.0f;
+	// Their favourite of the gallery's sculptures, by its place (INDEX_NONE: any).
+	int32 Art = INDEX_NONE;
 };

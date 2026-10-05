@@ -281,6 +281,11 @@ bool ARoomStage::LoadCast()
 		{
 			Member.Height = static_cast<float>(Height);
 		}
+		int32 Art = INDEX_NONE;
+		if ((*Object)->TryGetNumberField(TEXT("art"), Art))
+		{
+			Member.Art = Art;
+		}
 		Members.Add(Member);
 	}
 	UE_LOG(LogRoomStage, Log, TEXT("%d characters, from %s"), Members.Num(), *Path);

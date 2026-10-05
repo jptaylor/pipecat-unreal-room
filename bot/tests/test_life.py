@@ -388,3 +388,10 @@ def test_hands_up_if_moves_only_those_its_true_of(director: Director) -> None:
     plan = Plan([Take(THEO, "chorus", "…", USER)], True, "chorus", addressed=[THEO])
     reading = route(GROUP, included={MAYA: 0.9, THEO: 0.9, JUNO: 0.9})
     assert director._asked(plan, reading) == [THEO]
+
+
+def test_asked_their_favourite_piece_they_show_it_off(director: Director) -> None:
+    plan = Plan([Take(JUNO, "addressed", None, USER)], why="addressed", addressed=[JUNO])
+    act = director._with_act(plan, route(JUNO, act={"art": 0.9}))
+    assert act == {"type": "act", "who": [JUNO], "action": "art"}
+    assert "the coral ball" in (plan.takes[0].note or "")  # hers, from characters.json

@@ -137,7 +137,21 @@ ACTS = {
         "take the user to meet someone, and introduce them: 'can you introduce me to Juno?', "
         "'I'd like to meet Theo', 'take me to meet your friends'"
     ),
+    "art": (
+        "show the user their favourite piece of art in the gallery: 'what's your favourite piece?', "
+        "'which sculpture do you like best?', 'show me your favourite'"
+    ),
 }
+# The gallery's sculptures, in their places (RoomHouse.cpp builds them in this order): each
+# character's favourite is one of them (`Character.art`).
+SCULPTURES = (
+    "the coral ball",
+    "the golden cone",
+    "the teal cube",
+    "the lavender ball",
+    "the white cone",
+    "the blue cube",
+)
 # ...and as they set about it themselves, as they say a line.
 DOINGS = {
     NO_ACT: (
@@ -422,6 +436,10 @@ NOTE_ACT = {
     "water": "As you answer, you go to water the plants in the conservatory.",
     "stop": "As you answer, you stop what you're doing.",
     "hand": "As you answer, you hand the person what you're holding.",
+    "art": (
+        "As you answer, you go over to your favourite piece, {art}, and give it a spin to show it "
+        "off: say which it is, and why you love it, in a sentence."
+    ),
 }
 # ...asked to dance with no music on: they ask for some first...
 NOTE_NO_MUSIC = (
@@ -871,15 +889,33 @@ def move_question(areas: dict[str, str]) -> ChoiceQuestion:
             "examples": ["Wait here", "Stay there", "Stop following me", "Don't move"],
         },
         HOME: {
-            "what": "go back to their own place in the house (`homes`)",
-            "examples": ["Go back", "You can go now", "Back to your plants", "Off you go"],
+            "what": (
+                "go back to their own place in the house (`homes`), and to whatever they were "
+                "doing there"
+            ),
+            "examples": [
+                "Go back",
+                "You can go now",
+                "Back to your plants",
+                "Off you go",
+                "Go back to what you were doing",
+                "As you were, everyone",
+                "Back to your day",
+            ],
         },
     }
     for area, name in areas.items():
         options[f"{GO}{area}"] = {
             "what": f"go to {name}"
             + (f" (also called {AREA_ALIASES[area]})" if area in AREA_ALIASES else ""),
-            "examples": [f"Go to {name}", f"Meet me in {name}", f"Wait for me in {name}"],
+            "examples": [
+                f"Go to {name}",
+                f"Meet me in {name}",
+                f"Let's meet in {name}",
+                f"Everyone to {name}",
+                f"Head to {name}",
+                f"Wait for me in {name}",
+            ],
         }
     return ChoiceQuestion(
         instructions={
@@ -890,7 +926,8 @@ def move_question(areas: dict[str, str]) -> ChoiceQuestion:
             "clues": [
                 "Most of what the user says asks nobody to move: `stay`.",
                 "Coming over to the user is `come`; going along with them as they go is `follow`.",
-                "Sending someone back to their own room (`homes`) is `home`.",
+                "Sending someone back to their own room (`homes`), or back to what they were "
+                "doing, is `home`.",
                 "Asking someone to fetch, bring or pick something, or to introduce them to "
                 "someone, isn't a move (`stay`): the errand takes them where they need to go.",
             ],

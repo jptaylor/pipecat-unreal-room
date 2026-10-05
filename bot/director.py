@@ -105,6 +105,7 @@ from room import (
     NOTE_INTRODUCE_WHOM,
     NOTE_MOVE,
     NOTE_NO_MUSIC,
+    SCULPTURES,
     SINGULAR_ACTS,
     USER,
     Line,
@@ -177,7 +178,18 @@ class Live:
 
 # What takes a character somewhere by itself, and back: asked to do one of these, any "go to
 # the kitchen" read alongside it is the errand's, not a move.
-ERRANDS = {"food", "flower", "hand", "introduce", "cook", "play", "music_on", "music_off", "water"}
+ERRANDS = {
+    "food",
+    "flower",
+    "hand",
+    "introduce",
+    "cook",
+    "play",
+    "music_on",
+    "music_off",
+    "water",
+    "art",
+}
 
 
 class Director:
@@ -1160,7 +1172,12 @@ class Director:
         color = flower_color(reading.heard) if action == "flower" else None
         for take in doers:
             take.act = action
-            if color is not None:
+            if action == "art":
+                art = self.cast[take.speaker].art
+                text = NOTE_ACT["art"].format(
+                    art=SCULPTURES[art] if 0 <= art < len(SCULPTURES) else "the one you like best"
+                )
+            elif color is not None:
                 whom = self.cast[to].name if to is not None else "the person"
                 text = NOTE_FLOWER_COLOR.format(to=whom, color=color)
             elif action == "introduce" and to in self.space.listeners(take.speaker):

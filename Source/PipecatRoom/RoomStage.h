@@ -310,9 +310,6 @@ private:
 	bool bWasGramophoneOn = false;
 	// Who's being visited (by id), and so stays put for it.
 	TSet<FString> BeingVisited;
-	// How long each character has been waiting where they were sent, out of
-	// the player's earshot: a while, and they go home.
-	TMap<FString, float> Waited;
 	void UpdateSaying(ARoomCharacter* Character, FSaying& Saying, float ChannelLevel, float DeltaSeconds);
 
 public:

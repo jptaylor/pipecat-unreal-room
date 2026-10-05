@@ -69,7 +69,7 @@ ARoomStage* FindStage(UWorld* World)
 // E.g. Room.Act juno play, or Room.Interact, or Room.Routine theo.
 FAutoConsoleCommandWithWorldAndArgs ActCommand(
 	TEXT("Room.Act"),
-	TEXT("Has a character do something (dance, play, music_on, music_off, cook, food, flower, water, stop, hand or introduce), for "
+	TEXT("Has a character do something (dance, play, music_on, music_off, cook, food, flower, water, stop, hand, art or introduce), for "
 		 "someone, and in a color, e.g. Room.Act juno play, Room.Act theo food maya, or Room.Act maya flower - yellow"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World) {
 		ARoomStage* Stage = FindStage(World);
@@ -534,6 +534,24 @@ void ARoomStage::Act(ARoomCharacter* Character, const FString& What, ARoomCharac
 			}
 		});
 	}
+	else if (What == TEXT("art") && House.IsValid() && House->GetSculptureCount() > 0)
+	{
+		// Over to their favourite sculpture, to show it off with a spin.
+		const int32 Count = House->GetSculptureCount();
+		const int32 Art = Character->GetCast().Art;
+		const int32 Piece = Art >= 0 ? Art % Count : FMath::RandRange(0, Count - 1);
+		const FVector Sculpture = House->GetSculptureLocation(Piece);
+		const FVector Spot = House->FindSpotBy(Sculpture, Character->GetActorLocation(), 115.0f);
+		const float Yaw = (Sculpture - Spot).Rotation().Yaw;
+		Character->Do({FRoomStep::WalkTo(Spot, Yaw), FRoomStep::Make(ERoomGesture::Point), FRoomStep::Call([Stuff, Piece]() {
+						  if (Stuff.IsValid())
+						  {
+							  Stuff->Spin(Piece);
+						  }
+					  }),
+						  FRoomStep::Make(ERoomGesture::Clap)},
+			TEXT("showing the person their favourite sculpture"));
+	}
 	else if (What == TEXT("introduce") && For && House.IsValid())
 	{
 		// Over to whoever the player's to meet, to wait for the player there.
@@ -784,26 +802,6 @@ void ARoomStage::UpdateLife(float DeltaSeconds)
 	{
 		bWasGramophoneOn = Things->IsGramophoneOn();
 		SittingOut.Reset();
-	}
-
-	// Waiting where they were sent (to the kitchen by the bell, say) with the
-	// player nowhere near: after a couple of minutes, they go home.
-	for (ARoomCharacter* Character : Characters)
-	{
-		float& Alone = Waited.FindOrAdd(Character->GetId());
-		const bool bNearPlayer = Player && Reaches(Character->GetHeadLocation(), PlayerHead(), CharacterRange, Character, Player);
-		const bool bHosting = Introductions.ContainsByPredicate([Character](const FIntroduction& Each) { return Each.Host.Get() == Character; });
-		if (Character->GetIntent() != ERoomIntent::Wait || Character->IsBusy() || bNearPlayer || IsBeingIntroduced(Character) || bHosting)
-		{
-			Alone = 0.0f;
-			continue;
-		}
-		Alone += DeltaSeconds;
-		if (Alone > 120.0f)
-		{
-			Alone = 0.0f;
-			Character->SetIntent(ERoomIntent::Home);
-		}
 	}
 
 	// The music's quieter while anyone speaks over it.
