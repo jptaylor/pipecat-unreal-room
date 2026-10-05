@@ -19,6 +19,7 @@ class ARoomHouse;
 class ARoomItem;
 class FJsonObject;
 class USkeletalMeshComponent;
+class SRoomBubbles;
 class SRoomCaptions;
 class UPipecatVoiceComponent;
 class URoomVoiceRing;
@@ -90,6 +91,13 @@ public:
 	float MeetDistance = 480.0f;
 
 	/**
+	 * What the player's looking at is labeled on the screen within this many
+	 * cm of them (to its nearest side). The bot's told about it from further.
+	 */
+	UPROPERTY(Config)
+	float LabelDistance = 450.0f;
+
+	/**
 	 * The quietest the microphone counts as the player speaking, in dBFS,
 	 * however quiet the room: lower for a quiet microphone, higher for a noisy
 	 * room.
@@ -98,9 +106,12 @@ public:
 	float SpeechMinDb = -46.0f;
 
 	/**
-	 * Sends the bot the microphone only while the player is speaking, and
-	 * silence otherwise, so the game's own music and voices, if the microphone
-	 * picks them up, aren't taken for the player.
+	 * While a character's voice is playing, sends the bot the microphone only
+	 * while the player's speaking over it, and silence otherwise, so the
+	 * character's voice, if the microphone picks it up, isn't taken for the
+	 * player. The rest of the time, the bot's own VAD picks out their speech
+	 * (bot/speech.py), and this game's reading of their voice is only what
+	 * they see of it.
 	 */
 	UPROPERTY(Config)
 	bool bGateMicrophone = true;
@@ -160,6 +171,11 @@ private:
 	void UpdateEarshot(float DeltaSeconds);
 	void UpdateCharacters(float DeltaSeconds);
 	void UpdateSpace(float DeltaSeconds);
+	// Where each bubble hangs, over its speaker's head, and how they're seen and heard.
+	void UpdateBubbles(float DeltaSeconds);
+	// What the player's looking at: whatever's nearest the middle of their view, in plain
+	// sight, for the bot (in `space`) and the tag on the screen.
+	void UpdateLook(float DeltaSeconds);
 
 	// Whether a voice from `From` reaches `To`, carrying `Range` in the open.
 	bool Reaches(const FVector& From, const FVector& To, float Range, const AActor* Ignore, const AActor* Ignore2) const;
@@ -192,8 +208,9 @@ private:
 		TWeakObjectPtr<ARoomCharacter> Host;
 		TWeakObjectPtr<ARoomCharacter> Guest;
 		double Since = 0.0;
-		// When the host last set off after the guest.
+		// When the host last set off after the guest, and where the guest was then.
 		double Walked = 0.0;
+		FVector GuestAt = FVector::ZeroVector;
 	};
 	TArray<FIntroduction> Introductions;
 	void UpdateIntroductions();
@@ -258,6 +275,27 @@ private:
 	TWeakObjectPtr<ARoomHouse> House;
 	TArray<FRoomCast> Members;
 	TSharedPtr<SRoomCaptions> Captions;
+	TSharedPtr<SRoomBubbles> Bubbles;
+	// Where each character's bubble hangs from, eased as they move.
+	TMap<FString, FVector> BubbleAnchors;
+
+	// What the player's looking at, as the bot's told: a character's id, or what a thing's
+	// called, e.g. "the flowers"; its tag, and where; and what might be next, if it holds a
+	// moment. And the last thing they looked at before, and when, for a question asked as
+	// they turn to someone ("what are those?").
+	FString Looking;
+	FString LookingLabel;
+	FVector LookingAt = FVector::ZeroVector;
+	float LookingRadius = 0.0f;
+	TWeakObjectPtr<ARoomCharacter> LookingAtCharacter;
+	FString NextLook;
+	float NextLookFor = 0.0f;
+	// Looking at someone, the thing in view with them, e.g. the flowers they're standing by.
+	FString LookingThing;
+	FString NextThing;
+	float NextThingFor = 0.0f;
+	FString LookedAt;
+	double LookedAtWhen = -1000.0;
 
 	// The player's voice: how loud it is, in dB, and how loud usually; how
 	// loud the room is without it; whether they're speaking, and how far it
@@ -273,6 +311,8 @@ private:
 	float Hangover = 0.0f;
 	float Range = 0.0f;
 	float Presence = 0.0f;
+	// How long since a character's voice was last heard playing.
+	float SinceVoices = 10.0f;
 	float PretendLeft = 0.0f;
 	float PretendLoudness = 0.0f;
 	TArray<float> Waveform;

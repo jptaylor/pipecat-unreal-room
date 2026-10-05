@@ -12,15 +12,18 @@
 #include "RoomItem.h"
 #include "RoomThings.h"
 #include "RoomVoiceRing.h"
+#include "SRoomBubbles.h"
 #include "SRoomCaptions.h"
 
 #include "Components/CapsuleComponent.h"
 #include "Dom/JsonObject.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/FileHelper.h"
@@ -33,8 +36,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogRoomStage, Log, All);
 
 namespace
 {
-const FLinearColor UserColor(0.72f, 0.9f, 1.0f);
-
 // The player's voice starts this many dB over the room's own noise, kept up
 // for a moment (a click or a bump isn't a voice), and stops once it's been
 // under this many for a moment. While a character's voice is playing (which
@@ -48,14 +49,27 @@ const float OverVoices = 6.0f;
 const float OverMusic = 10.0f;
 // A new utterance, after this long quiet: who heard it starts again.
 const float NewUtteranceAfter = 1.5f;
+// A character's voice, as the microphone may pick it up: on the channel, and for this long
+// after (the room's echo of it).
+const float VoiceLevelHeard = 0.01f;
+const float VoiceEchoSeconds = 0.3f;
 // Every 6 dB louder, a voice carries twice as far.
 const float DoublingDb = 6.0f;
 
 // How long a mood lasts, by default, as someone speaks or listens.
 const float SpeakingMoodSeconds = 6.0f;
 const float ListeningMoodSeconds = 4.0f;
-// How long someone's caption stays once they've stopped, in seconds.
+// How long someone's bubble stays once they've stopped, in seconds.
 const float CaptionHold = 3.0f;
+// How far over a character's head their bubble hangs from, in cm.
+const float BubbleOverHead = 30.0f;
+// What the player looks at: within this many degrees of the middle of their view, however far
+// (the bot's told; the screen labels only what's close, LabelDistance), held this many seconds
+// before it counts (or before nothing does); and how long what they looked at before stays known.
+const float LookCone = 12.0f;
+const float LookSettles = 0.15f;
+const float LookAwaySettles = 0.4f;
+const double LookedAtSeconds = 10.0;
 // How fast a caption is shown as its line is said, in characters a second
 // (about how fast the voices speak), and how loud their voice's channel is when
 // they're heard saying it.
@@ -238,14 +252,19 @@ void ARoomStage::BeginPlay()
 
 void ARoomStage::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (Captions)
+	if (UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
 	{
-		if (UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
+		if (Captions)
 		{
 			Viewport->RemoveViewportWidgetContent(Captions.ToSharedRef());
 		}
-		Captions.Reset();
+		if (Bubbles)
+		{
+			Viewport->RemoveViewportWidgetContent(Bubbles.ToSharedRef());
+		}
 	}
+	Captions.Reset();
+	Bubbles.Reset();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -362,6 +381,9 @@ void ARoomStage::AddCaptions()
 	{
 		return;
 	}
+	// The characters' bubbles, under the player's words and the hints.
+	Bubbles = SNew(SRoomBubbles, GetWorld()->GetFirstPlayerController());
+	Viewport->AddViewportWidgetContent(Bubbles.ToSharedRef(), 9);
 	Captions = SNew(SRoomCaptions);
 	Viewport->AddViewportWidgetContent(Captions.ToSharedRef(), 10);
 	Captions->SetStatus(TEXT("Walk around and talk to whoever you find. Speak up to be heard further away."), 9.0f);
@@ -381,7 +403,9 @@ void ARoomStage::Tick(float DeltaSeconds)
 	UpdateCharacters(DeltaSeconds);
 	UpdateLife(DeltaSeconds);
 	UpdatePrompt(DeltaSeconds);
+	UpdateLook(DeltaSeconds);
 	UpdateSpace(DeltaSeconds);
+	UpdateBubbles(DeltaSeconds);
 }
 
 FVector ARoomStage::PlayerHead() const
@@ -487,9 +511,18 @@ void ARoomStage::UpdateSpeech(float DeltaSeconds)
 		LastEarshot.Reset();
 	}
 	Quiet = bSpeaking ? 0.0f : Quiet + DeltaSeconds;
+	// The microphone goes to the bot, whose VAD picks out the player's speech; but while a
+	// character's voice is playing (which it may pick up), only while the player's speaking
+	// over it.
+	bool bVoices = !Speaking.IsEmpty();
+	for (int32 Index = 0; Voice && Index < Characters.Num(); ++Index)
+	{
+		bVoices |= Voice->GetBotVoiceChannelLevel(Index) > VoiceLevelHeard;
+	}
+	SinceVoices = bVoices ? 0.0f : SinceVoices + DeltaSeconds;
 	if (Voice)
 	{
-		Voice->SetMicrophoneOpen(bSpeaking);
+		Voice->SetMicrophoneOpen(bSpeaking || SinceVoices > VoiceEchoSeconds);
 	}
 
 	// How far it carries: twice as far for every 6 dB louder than usual.
@@ -619,6 +652,17 @@ void ARoomStage::UpdateSpace(float DeltaSeconds)
 	TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
 	TSharedRef<FJsonObject> User = MakeShared<FJsonObject>();
 	User->SetStringField(TEXT("area"), House->AreaAt(Player->GetActorLocation()).ToString());
+	// What they're looking at (and, if it's someone, what's in view with them), and what they
+	// looked at just before.
+	User->SetStringField(TEXT("looking_at"), Looking);
+	if (!LookingThing.IsEmpty() && LookingThing != Looking && FindCharacter(Looking))
+	{
+		User->SetStringField(TEXT("also_seeing"), LookingThing);
+	}
+	if (!LookedAt.IsEmpty() && LookedAt != Looking && Clock - LookedAtWhen < LookedAtSeconds)
+	{
+		User->SetStringField(TEXT("looked_at"), LookedAt);
+	}
 	Data->SetObjectField(TEXT("user"), User);
 	TSharedRef<FJsonObject> Everyone = MakeShared<FJsonObject>();
 	for (ARoomCharacter* Character : Characters)
@@ -734,8 +778,7 @@ void ARoomStage::Say(const FString& Text)
 	Voice->SendText(Text);
 	if (Captions)
 	{
-		Captions->SetLine(TEXT("user"), TEXT("You"), UserColor, Text);
-		Captions->FadeOut(TEXT("user"), 4.0f);
+		Captions->SetTranscript(Text, true);
 	}
 }
 
@@ -771,15 +814,15 @@ void ARoomStage::HandleDisconnected()
 		Character->TalkTo(nullptr);
 		Character->SetListening(nullptr);
 	}
-	if (Captions)
+	if (Bubbles)
 	{
 		for (const TPair<FString, FSaying>& Saying : Sayings)
 		{
-			Captions->FadeOut(Saying.Key, 1.0f);
+			Bubbles->FadeOut(Saying.Key, 1.0f);
 		}
 		for (const FString& Was : Speaking)
 		{
-			Captions->FadeOut(Was, 1.0f);
+			Bubbles->FadeOut(Was, 1.0f);
 		}
 	}
 	Sayings.Reset();
@@ -803,14 +846,9 @@ void ARoomStage::HandleError(const FString& Error)
 
 void ARoomStage::HandleUserTranscript(const FString& Text, bool bFinal)
 {
-	if (!Captions || Text.TrimStartAndEnd().IsEmpty())
+	if (Captions)
 	{
-		return;
-	}
-	Captions->SetLine(TEXT("user"), TEXT("You"), UserColor, Text);
-	if (bFinal)
-	{
-		Captions->FadeOut(TEXT("user"), 4.0f);
+		Captions->SetTranscript(Text, bFinal);
 	}
 }
 
@@ -855,7 +893,7 @@ void ARoomStage::ShowWhole(const FString& Speaker)
 
 void ARoomStage::UpdateSaying(ARoomCharacter* Character, FSaying& Saying, float ChannelLevel, float DeltaSeconds)
 {
-	if (!Captions)
+	if (!Bubbles)
 	{
 		return;
 	}
@@ -893,36 +931,234 @@ void ARoomStage::UpdateSaying(ARoomCharacter* Character, FSaying& Saying, float 
 	{
 		Saying.Shown = Shown;
 		Saying.Clarity = Clarity(Character);
-		const FString Said = Text.Left(Shown);
 		if (Saying.Clarity > 0.3f)
 		{
-			Learn(Said);
+			Learn(Text.Left(Shown));
 		}
-		Captions->SetLine(Character->GetId(), Label(Character), Character->GetCast().Color, Said, Saying.Clarity);
+		// All of the line, so the bubble's its shape, showing what's been said.
+		Bubbles->SetLine(Character->GetId(), Label(Character), Character->GetCast().Color, Text, Shown);
 	}
 	if (bDone)
 	{
-		Captions->FadeOut(Character->GetId(), CaptionHold);
+		Bubbles->FadeOut(Character->GetId(), CaptionHold);
 		Sayings.Remove(Character->GetId());
 	}
 }
 
 float ARoomStage::Clarity(const ARoomCharacter* Character) const
 {
-	// Faint, and then gone, as they get further away, sooner through walls.
+	// Fading, from the edge of earshot to where their voice can't be heard at
+	// all, sooner through walls.
 	const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
 	float Distance = FVector::Dist(PlayerHead(), Character->GetHeadLocation());
 	if (!Reaches(Character->GetHeadLocation(), PlayerHead(), Distance + 1.0f, Character, Player))
 	{
 		Distance /= FMath::Max(ThroughWalls, 0.1f);
 	}
-	return 1.0f - FMath::SmoothStep(CharacterRange * 1.3f, CharacterRange * 2.6f, Distance);
+	return 1.0f - FMath::SmoothStep(CharacterRange, FMath::Max(VoiceFullWithin + VoiceFadesOver, CharacterRange * 1.2f), Distance);
+}
+
+void ARoomStage::UpdateBubbles(float DeltaSeconds)
+{
+	if (!Bubbles)
+	{
+		return;
+	}
+	const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
+	const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+	const FVector Camera =
+		Controller && Controller->PlayerCameraManager ? Controller->PlayerCameraManager->GetCameraLocation() : PlayerHead();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RoomBubbles), false);
+	for (const TObjectPtr<ARoomCharacter>& Character : Characters)
+	{
+		Params.AddIgnoredActor(Character);
+	}
+	if (Player)
+	{
+		Params.AddIgnoredActor(Player);
+	}
+	const FName PlayerArea = House.IsValid() && Player ? House->AreaAt(Player->GetActorLocation()) : NAME_None;
+	for (ARoomCharacter* Character : Characters)
+	{
+		const FString& Id = Character->GetId();
+		if (!Bubbles->IsShowing(Id))
+		{
+			BubbleAnchors.Remove(Id);
+			continue;
+		}
+		// Over their head, following it, but not every bob of it.
+		const FVector Head = Character->GetHeadLocation();
+		const FVector Over = Head + FVector(0.0f, 0.0f, BubbleOverHead * Character->GetActorScale3D().Z);
+		FVector* Anchor = BubbleAnchors.Find(Id);
+		if (!Anchor || FVector::Dist(*Anchor, Over) > 150.0f)
+		{
+			Anchor = &BubbleAnchors.Add(Id, Over);
+		}
+		Anchor->X = FMath::FInterpTo(Anchor->X, Over.X, DeltaSeconds, 16.0f);
+		Anchor->Y = FMath::FInterpTo(Anchor->Y, Over.Y, DeltaSeconds, 16.0f);
+		Anchor->Z = FMath::FInterpTo(Anchor->Z, Over.Z, DeltaSeconds, 6.0f);
+		// In view in the same room as the player, whatever's in the way (a
+		// pillar, say); from another, only if the camera can see their head or
+		// bubble, or either side of their head, through a doorway.
+		bool bInView = PlayerArea != NAME_None && House->AreaAt(Character->GetActorLocation()) == PlayerArea;
+		const FVector Side = FVector::CrossProduct((Head - Camera).GetSafeNormal2D(), FVector::UpVector) * 35.0f;
+		for (const FVector& Point : {*Anchor, Head, Head + Side, Head - Side})
+		{
+			FHitResult Hit;
+			if (bInView || !GetWorld()->LineTraceSingleByChannel(Hit, Camera, Point, ECC_Visibility, Params))
+			{
+				bInView = true;
+				break;
+			}
+		}
+		Bubbles->Place(Id, *Anchor, Clarity(Character), bInView);
+	}
+}
+
+void ARoomStage::UpdateLook(float DeltaSeconds)
+{
+	const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
+	const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+	if (!Controller || !Controller->PlayerCameraManager || !Player || !House.IsValid())
+	{
+		return;
+	}
+	const FVector Camera = Controller->PlayerCameraManager->GetCameraLocation();
+	const FVector Forward = Controller->PlayerCameraManager->GetCameraRotation().Vector();
+	const FVector Head = PlayerHead();
+
+	// Everything there is to look at: the house's furniture and art, its things, and the characters.
+	TArray<FRoomSight> Sights(House->GetSights());
+	if (Things)
+	{
+		Things->GetSights(Sights);
+	}
+	const int32 FirstCharacter = Sights.Num();
+	for (ARoomCharacter* Character : Characters)
+	{
+		Sights.Add({Character->GetId(), Character->GetActorLocation() + FVector(0.0f, 0.0f, 20.0f), 45.0f});
+	}
+
+	// Within the cone of the player's view, the nearest its middle first (what they're looking
+	// at already a little favored, so it doesn't flicker between two), and nearer before further.
+	TArray<TPair<float, int32>> InView;
+	for (int32 Index = 0; Index < Sights.Num(); ++Index)
+	{
+		const FRoomSight& Sight = Sights[Index];
+		const FVector To = Sight.Center - Camera;
+		const float Distance = To.Size();
+		// In front of the player, not between them and the camera.
+		if (Distance < 1.0f || FVector::DotProduct(Sight.Center - Head, Forward) < -Sight.Radius)
+		{
+			continue;
+		}
+		const float Angle = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(To / Distance, Forward), -1.0f, 1.0f)));
+		const float Off = FMath::Max(0.0f, Angle - FMath::RadiansToDegrees(FMath::Atan2(Sight.Radius, Distance)));
+		if (Off > LookCone)
+		{
+			continue;
+		}
+		const float Score = Off + Angle * 0.2f + Distance * 0.002f - (Sight.Name == Looking ? 3.0f : 0.0f);
+		InView.Add({Score, Index});
+	}
+	InView.Sort([](const TPair<float, int32>& A, const TPair<float, int32>& B) { return A.Key < B.Key; });
+
+	// The first in plain sight (nothing in the way, or only the thing itself, short of its
+	// middle), and the first thing, rather than someone.
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RoomLook), false);
+	Params.AddIgnoredActor(Player);
+	for (const TObjectPtr<ARoomCharacter>& Character : Characters)
+	{
+		Params.AddIgnoredActor(Character);
+	}
+	int32 Seen = INDEX_NONE;
+	int32 SeenThing = INDEX_NONE;
+	for (const TPair<float, int32>& Each : InView)
+	{
+		const FRoomSight& Sight = Sights[Each.Value];
+		const bool bThing = Each.Value < FirstCharacter;
+		if ((Seen != INDEX_NONE && !bThing) || (SeenThing != INDEX_NONE && bThing))
+		{
+			continue;
+		}
+		FHitResult Hit;
+		if (!GetWorld()->LineTraceSingleByChannel(Hit, Camera, Sight.Center, ECC_Visibility, Params)
+			|| Hit.Distance >= FVector::Dist(Camera, Sight.Center) - Sight.Radius * 1.2f)
+		{
+			Seen = Seen == INDEX_NONE ? Each.Value : Seen;
+			SeenThing = bThing ? Each.Value : SeenThing;
+			if (SeenThing != INDEX_NONE)
+			{
+				break;
+			}
+		}
+	}
+
+	// Something new counts once it's held a moment; and what they looked at before, if it
+	// wasn't someone, is remembered a while.
+	auto Settle = [DeltaSeconds](const FString& Now, FString& Current, FString& Next, float& NextFor) {
+		if (Now == Current)
+		{
+			Next = Now;
+			NextFor = 0.0f;
+			return false;
+		}
+		if (Now != Next)
+		{
+			Next = Now;
+			NextFor = 0.0f;
+		}
+		NextFor += DeltaSeconds;
+		if (NextFor < (Now.IsEmpty() ? LookAwaySettles : LookSettles))
+		{
+			return false;
+		}
+		Current = Now;
+		return true;
+	};
+	const FString Was = Looking;
+	if (Settle(Seen != INDEX_NONE ? Sights[Seen].Name : FString(), Looking, NextLook, NextLookFor))
+	{
+		if (!Was.IsEmpty() && !FindCharacter(Was))
+		{
+			LookedAt = Was;
+			LookedAtWhen = Clock;
+		}
+		UE_LOG(LogRoomStage, Log, TEXT("The player is looking at %s"), Looking.IsEmpty() ? TEXT("nothing in particular") : *Looking);
+	}
+	Settle(SeenThing != INDEX_NONE ? Sights[SeenThing].Name : FString(), LookingThing, NextThing, NextThingFor);
+
+	// Its tag: what it is, over it (someone by their name, once the player knows it).
+	if (Seen != INDEX_NONE && Sights[Seen].Name == Looking)
+	{
+		ARoomCharacter* Character = Seen >= FirstCharacter ? Characters[Seen - FirstCharacter].Get() : nullptr;
+		LookingAtCharacter = Character;
+		LookingAt = Sights[Seen].Center;
+		LookingRadius = Sights[Seen].Radius;
+		LookingLabel = Character ? (Known.Contains(Character->GetId()) ? Character->GetCast().Name : FString(TEXT("Someone new")))
+								 : Sights[Seen].Name;
+	}
+	if (ARoomCharacter* Character = LookingAtCharacter.Get(); Character && Character->GetId() == Looking)
+	{
+		LookingAt = Character->GetActorLocation() + FVector(0.0f, 0.0f, 20.0f);
+	}
+	if (Bubbles)
+	{
+		// Labeled only close by.
+		const bool bClose = FVector::Dist(Head, LookingAt) - LookingRadius <= LabelDistance;
+		FString Tag = Looking.IsEmpty() || !bClose ? FString() : LookingLabel;
+		if (!Tag.IsEmpty())
+		{
+			Tag[0] = FChar::ToUpper(Tag[0]);
+		}
+		Bubbles->SetTag(Tag, LookingAt);
+	}
 }
 
 FString ARoomStage::Label(const ARoomCharacter* Character) const
 {
 	// Only once the player has heard their name.
-	return Known.Contains(Character->GetId()) ? Character->GetCast().Name : TEXT("?");
+	return Known.Contains(Character->GetId()) ? Character->GetCast().Name : FString();
 }
 
 void ARoomStage::Learn(const FString& Text)
@@ -971,7 +1207,7 @@ void ARoomStage::HandleMessage(const FString& Message)
 				Speaker = *Was;
 			}
 		}
-		if (!Captions || Speaker.IsEmpty())
+		if (Speaker.IsEmpty())
 		{
 			return;
 		}
@@ -986,14 +1222,19 @@ void ARoomStage::HandleMessage(const FString& Message)
 				Character->SetThinking(false);
 				Character->TalkTo(nullptr);
 			}
-			Captions->FadeOut(Speaker, 0.3f);
+			if (Bubbles)
+			{
+				Bubbles->FadeOut(Speaker, 0.3f);
+			}
 			return;
 		}
 		Lines.Add(Id, Speaker);
 		if (Speaker == TEXT("user"))
 		{
-			Captions->SetLine(TEXT("user"), TEXT("You"), UserColor, Text);
-			Captions->FadeOut(TEXT("user"), 4.0f);
+			if (Captions)
+			{
+				Captions->SetTranscript(Text, true);
+			}
 			return;
 		}
 		if (FindCharacter(Speaker))
@@ -1021,7 +1262,7 @@ void ARoomStage::HandleMessage(const FString& Message)
 		TSet<FString> Now(StringList(Json, TEXT("speakers")));
 		for (const FString& Was : Speaking)
 		{
-			if (!Now.Contains(Was) && Captions)
+			if (!Now.Contains(Was) && Bubbles)
 			{
 				// The rest of their line shows once their voice has finished.
 				if (FSaying* Saying = Sayings.Find(Was))
@@ -1030,7 +1271,7 @@ void ARoomStage::HandleMessage(const FString& Message)
 				}
 				else
 				{
-					Captions->FadeOut(Was, CaptionHold);
+					Bubbles->FadeOut(Was, CaptionHold);
 				}
 			}
 			if (!Now.Contains(Was))
@@ -1068,6 +1309,12 @@ void ARoomStage::HandleMessage(const FString& Message)
 			if (!Target.IsEmpty())
 			{
 				Character->TalkTo(Resolve(Target));
+			}
+			if (Target == TEXT("user"))
+			{
+				// Talking with the player, they stay with them from now on, until
+				// they're sent back to their day.
+				Character->Settle();
 			}
 		}
 	}

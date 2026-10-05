@@ -366,6 +366,18 @@ FVector ARoomThings::GetLocation(FName Thing, int32 Index) const
 	return FVector::ZeroVector;
 }
 
+void ARoomThings::GetSights(TArray<FRoomSight>& Out) const
+{
+	Out.Add({TEXT("the gramophone"), GramophoneAt + FVector(0.0f, 0.0f, 100.0f), 50.0f});
+	Out.Add({TEXT("the piano"), PianoAt, 90.0f});
+	Out.Add({TEXT("the pot on the stove"), PotAt + FVector(0.0f, 0.0f, 10.0f), 35.0f});
+	Out.Add({bCake ? TEXT("the cake") : TEXT("the empty cake stand"), CakeAt + FVector(0.0f, 0.0f, 25.0f), 40.0f});
+	Out.Add({TEXT("the dinner bell"), BellAt + FVector(12.0f, 0.0f, 140.0f), 25.0f});
+	Out.Add({TEXT("the flowers"), FlowersAt + FVector(0.0f, 0.0f, 60.0f), 150.0f});
+	Out.Add({TEXT("the tomato plants"), TomatoesAt + FVector(0.0f, 0.0f, 60.0f), 150.0f});
+	Out.Add({TEXT("the fountain"), FountainAt + FVector(0.0f, 0.0f, 50.0f), 140.0f});
+}
+
 bool ARoomThings::FindInteraction(const FVector& Where, const FVector& Facing, ERoomItem Held, FInteraction& Out) const
 {
 	float Best = TNumericLimits<float>::Max();

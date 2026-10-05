@@ -180,7 +180,102 @@ async def test_together_at_last_they_introduce_the_user(
     [plan] = played
     assert plan.takes[0].speaker == MAYA and plan.takes[0].to == JUNO
     assert "Introduce them to each other" in (plan.takes[0].note or "")
+    # ...and Juno says hello to the user, whose turn it is then.
+    assert plan.takes[1].speaker == JUNO and plan.takes[1].to == USER
+    assert plan.takes[1].note == NOTE_EVENT["introduced"].format(
+        who="Maya", to="Juno", item="something", place="the house"
+    )
     assert JUNO in director.space.talked  # and now the user has met her
+
+
+class LullAsked(Exception):
+    pass
+
+
+class LullReferee:
+    """A referee that only says when a lull is read."""
+
+    async def lull(self, *args: Any) -> Reading:
+        raise LullAsked
+
+
+def leading_maya_to_juno(director: Director) -> None:
+    director.space.update(
+        {
+            "user": {"area": "conservatory"},
+            "characters": {
+                MAYA: {"area": "conservatory", "hears": [USER], "intent": "wait"},
+                JUNO: {"area": "music", "hears": []},
+            },
+        }
+    )
+    director.space.talked_with(MAYA)
+    plan = Plan([Take(MAYA, "addressed", None, USER)], why="addressed", addressed=[MAYA])
+    assert director._with_act(plan, route(MAYA, act={"introduce": 0.9}, for_={JUNO: 0.9}))
+
+
+async def test_on_the_way_to_meet_someone_nobody_breaks_the_quiet(
+    director: Director, played: list[Plan]
+) -> None:
+    director.referee = LullReferee()  # type: ignore[assignment]
+    leading_maya_to_juno(director)
+    await director.idle()  # no lull: Maya would only introduce them early, and then again
+    await director.event(
+        {"kind": "introduce", "who": MAYA, "to": JUNO, "heard_by": [MAYA, JUNO, USER]}
+    )
+    assert [p.why for p in played] == ["introduce"]
+    with pytest.raises(LullAsked):
+        await director.idle()  # together now, a lull's anyone's
+
+
+def test_speaking_to_the_user_for_the_first_time_they_ask_who_they_are(
+    director: Director,
+) -> None:
+    def note(take: Take) -> str:
+        return director._view(take)[-1]["content"]
+
+    ask = "say who you are and, unless they've just said, ask who they are"
+    first = note(Take(THEO, "addressed", None, USER))  # wherever the user is
+    assert ask in first and first.endswith('("I\'m Theo. And you are?").]')
+    director.space.talked_with(THEO)
+    assert ask not in note(Take(THEO, "addressed", None, USER))  # they've met
+    assert ask not in note(Take(MAYA, "chorus", None, USER))  # "Yes!", not a hello
+    director.space.being_introduced = {JUNO}
+    assert ask not in note(Take(JUNO, "addressed", None, USER))  # Maya will introduce them
+
+
+async def test_whoever_the_user_is_being_brought_to_meet_waits_to_be_introduced(
+    director: Director, played: list[Plan]
+) -> None:
+    leading_maya_to_juno(director)
+    assert director.space.being_introduced == {JUNO}
+    await director.event(
+        {"kind": "introduce", "who": MAYA, "to": JUNO, "heard_by": [MAYA, JUNO, USER]}
+    )
+    assert director.space.being_introduced == set()
+
+
+async def test_once_the_user_has_moved_the_talk_on_whats_still_to_be_said_is_old_news(
+    director: Director,
+) -> None:
+    gift = Plan([Take(MAYA, "event", "a gift", USER)], why="gift")
+    introduce = Plan([Take(MAYA, "event", "meet Juno", JUNO)], why="introduce")
+    later = Plan([Take(THEO, "event", "the cake's ready", USER)], why="baked")
+    now = time.monotonic()
+    director._events = [(now - 5.0, gift), (now - 4.0, introduce), (now + 1.0, later)]
+    director._moved_on(now)  # the user's turn ended now
+    assert [p.why for _, p in director._events] == ["introduce", "baked"]
+
+
+async def test_already_talking_with_whoever_they_came_to_meet_theres_no_introducing(
+    director: Director, played: list[Plan]
+) -> None:
+    leading_maya_to_juno(director)
+    director.space.talked_with(JUNO)  # the user said hello to Juno as they got there
+    await director.event(
+        {"kind": "introduce", "who": MAYA, "to": JUNO, "heard_by": [MAYA, JUNO, USER]}
+    )
+    assert played == []
 
 
 def test_doing_what_the_user_asked_their_own_lines_dont_send_them_off(
@@ -282,6 +377,44 @@ async def test_the_musician_is_the_one_to_say_something_about_the_music(
     assert plan.why == "music_on" and plan.takes[0].speaker == JUNO
 
 
+async def test_dancers_stopped_mid_dance_each_say_a_word_or_two(
+    director: Director, played: list[Plan]
+) -> None:
+    await director.event(
+        {
+            "kind": "music",
+            "on": False,
+            "who": USER,
+            "heard_by": [MAYA, THEO, JUNO],
+            "dancing": [MAYA, THEO],
+        }
+    )
+    [plan] = played
+    assert plan.why == "music_off" and plan.together
+    assert sorted(t.speaker for t in plan.takes) == [MAYA, THEO]
+    assert all(t.note == NOTE_EVENT["music_off_dancing"] for t in plan.takes)
+
+
+async def test_the_music_stopped_with_nobody_dancing_is_the_musicians_to_remark_on(
+    director: Director, played: list[Plan]
+) -> None:
+    await director.event(
+        {"kind": "music", "on": False, "who": USER, "heard_by": [MAYA, JUNO], "dancing": []}
+    )
+    [plan] = played
+    assert plan.takes[0].speaker == JUNO and plan.takes[0].note == NOTE_EVENT["music_off"]
+
+
+async def test_the_cake_is_announced_only_to_someone_there_to_hear_it(
+    director: Director, played: list[Plan]
+) -> None:
+    await director.event({"kind": "baked", "who": THEO, "item": "a cake", "heard_by": [THEO]})
+    assert played == []  # baked first thing, with nobody in the kitchen
+    await director.event({"kind": "baked", "who": THEO, "item": "a cake", "heard_by": [THEO, USER]})
+    [plan] = played
+    assert plan.takes[0].speaker == THEO
+
+
 async def test_a_visit_is_a_word_with_whoever_is_visited(
     director: Director, played: list[Plan]
 ) -> None:
@@ -306,7 +439,7 @@ async def test_whats_happened_waits_until_nobody_is_talking_and_goes_stale(
     director: Director, played: list[Plan], monkeypatch
 ) -> None:
     monkeypatch.setattr(Director, "busy", property(lambda self: True))
-    await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO]})
+    await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO, USER]})
     assert played == [] and len(director._events) == 1
     monkeypatch.setattr(Director, "busy", property(lambda self: False))
     at, plan = director._events[0]
@@ -350,7 +483,7 @@ async def test_the_latest_news_comes_first_and_the_bell_drowns_out_the_rest(
     director: Director, played: list[Plan], monkeypatch
 ) -> None:
     monkeypatch.setattr(Director, "busy", property(lambda self: True))
-    await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO]})
+    await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO, USER]})
     await director.event({"kind": "visit", "who": MAYA, "to": JUNO, "heard_by": [MAYA, JUNO]})
     monkeypatch.setattr(Director, "busy", property(lambda self: False))
     await director._news()
@@ -365,13 +498,13 @@ async def test_news_waits_for_a_turn_being_routed_and_not_for_a_hushed_table(
     director: Director, played: list[Plan]
 ) -> None:
     director._routing = 1  # Jev is reading the user's turn
-    await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO]})
+    await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO, USER]})
     assert played == [] and len(director._events) == 1
     director._routing = 0
     await director._news()
     assert [p.why for p in played] == ["baked"]
     director.engine.hush()
-    await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO]})
+    await director.event({"kind": "baked", "who": THEO, "heard_by": [THEO, USER]})
     assert len(played) == 1  # the table's been hushed
 
 

@@ -11,14 +11,13 @@
 #include "Widgets/SCompoundWidget.h"
 
 class STextBlock;
-class SVerticalBox;
 class SWidget;
 
-// Captions at the bottom of the screen, as in a film: a line each for the
-// player and for each character who's speaking, under their name, in their
-// color, on a frosted panel that fades in while there's something to read.
-// Several can speak at once, each on their own line. Above them, a hint, or
-// the connection's status, if there is one.
+// The player's own words at the foot of the screen, over a soft dark
+// gradient: grey as they're heard, and white once they're final. Above them, a
+// hint, or the connection's status, if there is one; and in the corner, what
+// the player can do where they are. (What the characters say is in bubbles
+// over their heads: SRoomBubbles.)
 class SRoomCaptions : public SCompoundWidget
 {
 public:
@@ -31,42 +30,27 @@ public:
 	/** A line on its own, e.g. a hint, or how the connection is going, faded out after so many seconds (0: kept). */
 	void SetStatus(const FString& Text, float Seconds = 0.0f);
 
-	/**
-	 * What someone says, under their name, in their color, as clear as
-	 * `Clarity` (from 0 to 1): a far voice is faint. The same `Key` replaces
-	 * what they said before.
-	 */
-	void SetLine(const FString& Key, const FString& Name, const FLinearColor& Color, const FString& Text, float Clarity = 1.0f);
-
-	/** Fades someone's line out in so many seconds, unless they say something else by then. */
-	void FadeOut(const FString& Key, float Seconds);
+	/** What the player's saying, as it's heard, and once it's final, when it fades out after a while. */
+	void SetTranscript(const FString& Text, bool bFinal);
 
 	/** What the player can do where they are, with the E key, e.g. "Put a record on". Empty: nothing. */
 	void SetPrompt(const FString& Text);
 
 private:
-	struct FRow
-	{
-		FString Key;
-		TSharedPtr<SWidget> Block;
-		TSharedPtr<STextBlock> Label;
-		TSharedPtr<STextBlock> Words;
-		float Clarity = 1.0f;
-		float Opacity = 0.0f;
-		float FadeIn = -1.0f;
-		bool bShown = false;
-	};
-	FRow& Row(const FString& Key);
-
 	TSharedPtr<STextBlock> Status;
 	float StatusLeft = 0.0f;
-	TSharedPtr<SVerticalBox> Lines;
-	TSharedPtr<SWidget> Panel;
-	TArray<TSharedPtr<FRow>> Rows;
-	FSlateRoundedBoxBrush PanelBrush = FSlateRoundedBoxBrush(FLinearColor(0.012f, 0.012f, 0.018f, 0.42f), 18.0f);
-	float PanelOpacity = 0.0f;
+	TSharedPtr<SWidget> Shade;
+	float ShadeOpacity = 0.0f;
+	TSharedPtr<STextBlock> Transcript;
+	// How long the player's words stay, and how shown they are, and how
+	// white (final) they are.
+	float TranscriptLeft = 0.0f;
+	float TranscriptOpacity = 0.0f;
+	bool bFinal = false;
+	float Whiteness = 0.0f;
 	TSharedPtr<SWidget> PromptBlock;
 	TSharedPtr<STextBlock> Prompt;
+	FSlateRoundedBoxBrush PanelBrush = FSlateRoundedBoxBrush(FLinearColor(0.012f, 0.012f, 0.018f, 0.42f), 18.0f);
 	FSlateRoundedBoxBrush KeyBrush = FSlateRoundedBoxBrush(FLinearColor(0.9f, 0.92f, 0.95f, 0.95f), 6.0f);
 	bool bPrompt = false;
 	float PromptOpacity = 0.0f;

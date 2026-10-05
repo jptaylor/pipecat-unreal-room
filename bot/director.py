@@ -74,6 +74,7 @@ from config import (
     FOR_FLOOR,
     GESTURE_FLOOR,
     INTENT_FLOOR,
+    INTRODUCE_WAIT_S,
     LISTENER_MOOD_STRENGTH,
     MERGE_GAP_S,
     MOOD_FLOOR,
@@ -105,6 +106,7 @@ from room import (
     NOTE_INTRODUCE_WHOM,
     NOTE_MOVE,
     NOTE_NO_MUSIC,
+    NOTE_STRANGER,
     SCULPTURES,
     SINGULAR_ACTS,
     USER,
@@ -203,6 +205,9 @@ class Director:
         self._events: list[tuple[float, Plan]] = []
         self._routing = 0  # user turns being read and acted on
         self._lull_timer: asyncio.Task | None = None  # a lull waited out after an unanswered turn
+        # Who's leading the user to meet someone: host → (guest, when they set off (monotonic),
+        # whether the user had talked with the guest already).
+        self._introducing: dict[str, tuple[str, float, bool]] = {}
         self.engine = Engine(self.transcript)
         self.referee = referee
         self.floor = Floor(self, list(self.cast))
@@ -343,6 +348,13 @@ class Director:
             kind = "music_on" if data.get("on") else "music_off"
         heard_by = {str(h) for h in data.get("heard_by") or []}
         heard = [c for c in self.cast if c in heard_by]
+        # Who was dancing as the music stopped: as the game says, or as it last said.
+        dancing = (
+            {str(d) for d in data.get("dancing") or []}
+            if "dancing" in data
+            else {c for c, doing in self.space.doing.items() if doing == "dancing"}
+        )
+        dancers = [c for c in heard if c in dancing] if kind == "music_off" else []
         who, to = str(data.get("who") or ""), str(data.get("to") or "")
         fields = {
             "who": self.cast[who].name if who in self.cast else "the person",
@@ -362,12 +374,22 @@ class Director:
         elif kind == "handed" and to in self.cast and who in self.cast:
             # Handed to one of them: whoever gives it says so, and whoever gets it answers.
             speaker, target, said = who, to, "handing"
-        elif kind in ("handed", "baked") and who in self.cast:
+        elif kind == "handed" and who in self.cast:
             speaker = who
+        elif kind == "baked" and who in self.cast and heard_by - {who}:
+            speaker = who  # said out loud, if there's anyone there to hear it
         elif kind == "visit" and who in self.cast and to in self.cast:
             speaker, target = who, to
         elif kind == "introduce" and who in self.cast and to in self.cast:
             # They've brought the user to meet someone: they introduce them, and they've met.
+            # Unless they've already got talking, when it's done.
+            pending = self._introducing.pop(who, None)
+            self._introductions()
+            if pending is not None and not pending[2] and to in self.space.talked:
+                logger.info(
+                    f"Director: the user's already met {self.cast[to].name}: no introducing"
+                )
+                return
             speaker, target = who, to
             self._talked_with([to])
         elif kind == "picked":
@@ -382,11 +404,17 @@ class Director:
             takes = [Take(c, "event", NOTE_EVENT["bell"]) for c in self.cast]
             plan = Plan(takes, together=True, why="bell")
             self._events.clear()
+        elif dancers:
+            # Stopped mid-dance: each of them says a word or two about it, at once.
+            takes = [Take(c, "event", NOTE_EVENT["music_off_dancing"], USER) for c in dancers]
+            plan = Plan(takes, together=len(takes) > 1, why="music_off")
         elif speaker is not None and said in NOTE_EVENT:
             note = NOTE_EVENT[said].format(**fields)
             takes = [Take(speaker, "event", note, target)]
             if said == "handing" and to in heard_by:
                 takes.append(Take(to, "event", NOTE_EVENT["received"].format(**fields), who))
+            if said == "introduce":
+                takes.append(Take(to, "event", NOTE_EVENT["introduced"].format(**fields), USER))
             plan = Plan(takes, why=said, fresh=said in ("visit", "introduce"))
         else:
             return
@@ -465,7 +493,14 @@ class Director:
     def _view(self, take: Take) -> list[dict[str, str]]:
         """What `take`'s character is shown: what they heard, and the moment's note, with where
         they are and who's with them first."""
-        note = " ".join(n for n in (self.space.situation(take.speaker), take.note) if n)
+        stranger = (
+            take.to == USER
+            and take.reason != "chorus"
+            and take.speaker not in self.space.talked
+            and take.speaker not in self.space.being_introduced
+        )
+        meeting = NOTE_STRANGER.format(name=self.cast[take.speaker].name) if stranger else None
+        note = " ".join(n for n in (self.space.situation(take.speaker), take.note, meeting) if n)
         view = self.transcript.view(take.speaker, note or None)
         if take.reason in ("addressed", "group", "chorus") and take.to == USER:
             # Answering the user: they've met now (the note above was written before).
@@ -869,6 +904,8 @@ class Director:
             await self.emit(act)
         self.log_reading(reading)
         logger.info(f"Director: the user's turn: {plan.why} {members}")
+        if plan.takes:
+            self._moved_on(ended)
         await self._arm_lull()
         if epoch != self._epoch:
             return
@@ -1045,6 +1082,8 @@ class Director:
             return
         if not self.space.friends_near_user():
             return  # nobody near the user who knows them to say anything
+        if self._leading_to_meet():
+            return  # the host would only introduce them early, and then again when they're there
         epoch = self._epoch
         quiet = time.monotonic() - self._quiet_since
         reading = await self.referee.lull(self.transcript, quiet)
@@ -1055,6 +1094,33 @@ class Director:
         self.log_reading(reading)
         await self._arm_lull()
         await self.play(plan)
+
+    def _moved_on(self, since: float) -> None:
+        """The user has said something since these happened (by `since`, monotonic), and is being
+        answered: what was still to be said about them is old news, but for an introduction,
+        which is still to be made."""
+        stale = [p for at, p in self._events if at <= since and p.why != "introduce"]
+        if stale:
+            whys = ", ".join(p.why for p in stale)
+            logger.info(f"Director: the talk has moved on: nothing said about {whys}")
+            self._events = [(at, p) for at, p in self._events if not any(p is s for s in stale)]
+
+    def _introductions(self) -> None:
+        """Whoever's waiting to be introduced to the user, for their notes (`Space`)."""
+        self.space.being_introduced = {guest for guest, _, _ in self._introducing.values()}
+
+    def _leading_to_meet(self) -> bool:
+        """Whether someone's leading the user to meet someone else, still: until the game says
+        they're all together, or gives up, or the host has been sent off to do something else."""
+        now = time.monotonic()
+        self._introducing = {
+            host: pending
+            for host, pending in self._introducing.items()
+            if now - pending[1] < INTRODUCE_WAIT_S
+            and (now - pending[1] < 3.0 or self.space.intent.get(host) in (None, "wait"))
+        }
+        self._introductions()
+        return bool(self._introducing)
 
     def _ask_holder(self, reading: Reading, line: Line) -> Reading:
         """Asking for what someone has ('can I have that flower back?') is asking them: if Jev
@@ -1188,6 +1254,10 @@ class Director:
                 text = NOTE_ACT[action]
             take.note = f"{take.note} {text}" if take.note else text
         who = [plan.takes[0].speaker] if action in SINGULAR_ACTS else self._asked(plan, reading)
+        if action == "introduce" and to is not None:
+            host = doers[0].speaker
+            self._introducing[host] = (to, time.monotonic(), to in self.space.talked)
+            self._introductions()
         act: dict[str, Any] = {"type": "act", "who": who, "action": action}
         if to is not None:
             act["to"] = to

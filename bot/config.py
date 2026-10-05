@@ -16,7 +16,38 @@ HERE = Path(__file__).resolve().parent
 
 JEV_MODEL = "jev-1.13.0"  # the floors below were tried on this version
 DEEPGRAM_MODEL = "flux-general-en"  # Flux: transcription with its own end-of-turn detection
+# Words Flux listens out for (keyterm prompting), besides the characters' names: the house's
+# rooms and things, as the user says them ("flower", not "flour"), and the gallery's sculptures
+# (room.SCULPTURES). Deepgram takes up to 100; each one boosted is one more it may hear wrongly.
+STT_KEYTERMS = (
+    "flower",
+    "flowers",
+    "tomato",
+    "tomatoes",
+    "carrot cake",
+    "gramophone",
+    "piano",
+    "fountain",
+    "dinner bell",
+    "sculpture",
+    "painting",
+    "conservatory",
+    "gallery",
+    "music room",
+)
+# The user's speech, as Flux hears it (`speech.py`): Silero, readier than the user aggregator's
+# (any voice, quick to start, and pauses of up to SPEECH_HOLD_S kept in), and this much audio
+# from before each start.
+SPEECH_VAD_CONFIDENCE = 0.5
+SPEECH_VAD_START_S = 0.1
+SPEECH_HOLD_S = 1.0
+SPEECH_MIN_VOLUME = 0.4  # loudness, from 0 (-110 LUFS) to 1 (-10 LUFS): a quiet voice too
+SPEECH_PRE_ROLL_S = 0.5
 OPENAI_MODEL = "gpt-4.1-mini"  # the characters' LLM, unless PhoneLLM is set up (see Settings)
+# OpenAI's reasoning models (GPT-5 on, e.g. gpt-5.6-luna) think before they answer unless told
+# not to: the characters answer straight away.
+OPENAI_REASONING_EFFORT = "none"
+OPENAI_REASONING_MODELS = ("gpt-5", "gpt-6", "o1", "o3", "o4")
 
 # --- Workers ----------------------------------------------------------------------------------
 
@@ -37,7 +68,6 @@ INCLUDED_FLOOR = 0.5  # a group turn: how sure Jev must be that a character is o
 ALSO_ASKED_FLOOR = 0.7
 CHORUS_FLOOR = 0.5  # ...and that they can all answer at once, rather than in turn
 ONLY_IF_FLOOR = 0.5  # ...and that only those it's true for should ("say yes if…")
-TRUE_OF_FLOOR = 0.5  # ...and, for each, that it's true of them
 # How sure Jev must be the user means "carry on" or "quiet now", not "answer me": a quiet table
 # when they wanted an answer is the worse mistake.
 INTENT_FLOOR = 0.7
@@ -53,6 +83,9 @@ DOING_FLOOR = 0.75
 # Something that happened in the house (a gift, the bell, music) is reacted to this soon, or not
 # at all: by the time the room is quiet again, it's old news.
 EVENT_STALE_S = 20.0
+# Someone leading the user to meet someone else introduces them once they're all together (the
+# game's `introduce` event): the game gives up on it after this long (RoomStageLife).
+INTRODUCE_WAIT_S = 150.0
 REPLY_FLOOR = 0.5  # after a line: how sure Jev must be that it's for this character to answer,
 TABLE_FLOOR = 0.8  # ...unless it's this sure it's for someone at the table: the likeliest answers
 REACT_FLOOR = 0.6  # ...and that someone reacts out loud (a laugh, a groan) as it ends
@@ -130,9 +163,14 @@ VOICE_QUEUE_S = 0.1
 LLM_TOKENS = 200
 LLM_HISTORY_LINES = 60  # the most of the conversation a character is shown, in lines
 LLM_TEMPERATURE = 0.0  # PhoneLLM must run at temperature 0: never change this
+# PhoneLLM reasons briefly before each line to correct itself; the reasoning comes back apart
+# from the content, and pipecat only speaks the content.
+LLM_THINKING = True
 # Also counts the prompt's tokens (vLLM): without it, a character at temperature 0 soon answers
-# with a line it already said, word for word.
-LLM_REPETITION_PENALTY = 1.1  # the default; LLM_REPETITION_PENALTY in .env overrides (1.0: off)
+# with a line it already said, word for word. It also weighs on the reasoning: at 1.1 PhoneLLM
+# reasons in circles until max_tokens, and a quarter of its lines came back empty in a soak. 1.0
+# repeats lull lines word for word (12 of 65); 1.05 did neither (1 of 71, none empty).
+LLM_REPETITION_PENALTY = 1.05  # the default; LLM_REPETITION_PENALTY in .env overrides (1.0: off)
 LLM_WARM_TIMEOUT_S = 240.0  # the hosted endpoint scales to zero; a cold start takes minutes
 
 

@@ -27,18 +27,23 @@ from config import (
     DEEPGRAM_MODEL,
     JEV_TIMEOUT_S,
     LLM_TEMPERATURE,
+    LLM_THINKING,
     LLM_TOKENS,
     LLM_WARM_TIMEOUT_S,
     MIN_WORDS_TO_INTERRUPT,
+    OPENAI_REASONING_EFFORT,
+    OPENAI_REASONING_MODELS,
+    STT_KEYTERMS,
     Character,
     Settings,
 )
+from room import SCULPTURES
 
 
 def extra_body(settings: Settings) -> dict:
     """The request body PhoneLLM needs beyond the OpenAI parameters."""
     return {
-        "chat_template_kwargs": {"enable_thinking": False},
+        "chat_template_kwargs": {"enable_thinking": LLM_THINKING},
         "repetition_penalty": settings.llm_repetition_penalty,
     }
 
@@ -53,12 +58,14 @@ def llm(settings: Settings, system_prompt: str) -> OpenAILLMService:
     """One character's LLM, with the character's prompt as its system prompt: PhoneLLM at
     temperature 0, as the kitchen table has it, or OpenAI."""
     if not settings.phonellm:
+        reasoning = settings.llm_model.startswith(OPENAI_REASONING_MODELS)
         return OpenAILLMService(
             api_key=settings.llm_api_key,
             settings=OpenAILLMService.Settings(
                 model=settings.llm_model,
                 system_instruction=system_prompt,
-                max_tokens=LLM_TOKENS,
+                max_completion_tokens=LLM_TOKENS,  # reasoning models don't take max_tokens
+                extra={"reasoning_effort": OPENAI_REASONING_EFFORT} if reasoning else {},
             ),
         )
     return PhoneLLMService(
@@ -102,11 +109,17 @@ class FluxSTTService(DeepgramFluxSTTService):
         await super().push_frame(frame, direction)
 
 
+def keyterms(cast: Sequence[Character]) -> list[str]:
+    """What Flux listens out for: the characters' names, and the house's rooms and things."""
+    sculptures = [s.removeprefix("the ") for s in SCULPTURES]
+    return [c.name for c in cast] + list(STT_KEYTERMS) + sculptures
+
+
 def stt(settings: Settings, cast: Sequence[Character]) -> FluxSTTService:
     """Deepgram Flux: the user's words, and when their turn ends (with `turn_strategies`)."""
     return FluxSTTService(
         api_key=settings.deepgram_api_key,
-        settings=FluxSTTService.Settings(model=DEEPGRAM_MODEL, keyterm=[c.name for c in cast]),
+        settings=FluxSTTService.Settings(model=DEEPGRAM_MODEL, keyterm=keyterms(cast)),
     )
 
 
@@ -155,7 +168,7 @@ async def warm_llm(settings: Settings) -> None:
             messages=[{"role": "user", "content": "Say hi."}],
             max_tokens=4,
             temperature=0,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            extra_body={"chat_template_kwargs": {"enable_thinking": LLM_THINKING}},
         )
         logger.info(f"PhoneLLM: warm ({time.perf_counter() - started:.1f} s)")
     except Exception as error:  # noqa: BLE001 — the session goes on; its first turn will wait

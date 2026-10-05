@@ -156,7 +156,7 @@ and say hello.
 ## ⚙️ How it works
 
 ```
-the game  ── microphone ──►  room      transport → Deepgram Flux → Hearing → user aggregator
+the game  ── microphone ──►  room      transport → Silero → Deepgram Flux → Hearing → user agg.
           ◄─ 3-channel ────            → Router → CastBridge → FloorGate → transport → FloorEar
              audio, one           maya, theo, juno   a worker each: OpenAI → Cartesia, in their voice
              voice each
@@ -186,8 +186,14 @@ the game  ── microphone ──►  room      transport → Deepgram Flux →
     they're setting about something themselves. The game has them do it (`act`).
   - **What happens** (`event`). The game tells the bot what happens in the
     house, and who saw or heard it. They know it, and whoever it's most about
-    says something, as soon as nobody's talking. The game also tells the bot
-    what each of them is doing and holding, and whether there's music or cake.
+    says something, as soon as nobody's talking (unless you've moved the talk
+    on since). The game also tells the bot what each of them is doing and
+    holding, whether there's music or cake, and what you're looking at, so
+    "what are those?" means the flowers in front of you.
+  - **Your speech** (`speech.py`). Silero passes only your speech to Flux, from
+    a moment before it starts, so music or a cough in the room isn't
+    transcribed. While a character is talking, the game only sends your
+    microphone while you talk over them, so their voice isn't taken for yours.
   - **Meeting.** Someone you haven't talked with yet waits for you to speak
     first, and only those you've talked with pick up a quiet moment. Jev knows
     who you've met, so "oh, hello, who are you?" goes to the stranger, not to
@@ -220,6 +226,10 @@ the game  ── microphone ──►  room      transport → Deepgram Flux →
     It's a procedural rig, so it needs no animation assets.
   - `RoomVoiceRing` draws the waveform at your feet, the edge of your voice's
     reach, and ripples running out to it.
+  - `SRoomBubbles` draws what the characters say in speech bubbles over their
+    heads, smaller further away and fading out of earshot, and a small tag on
+    what you're looking at; `SRoomCaptions` shows your own words at the foot
+    of the screen, grey as they're heard and white once they're final.
 - **The plugin** (`Plugins/Pipecat`) is the demo's, with several voice channels,
   each played from where it's attached, messages to the bot, and the
   microphone's waveform.

@@ -60,6 +60,7 @@ from director import Director
 from floor import CastBridge
 from mixer import CastWebsocketTransport
 from room import Referee
+from speech import SpeechGate
 
 load_environment()
 CAST = load_cast()
@@ -115,6 +116,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     pipeline = Pipeline(
         [
             transport.input(),
+            SpeechGate(),  # only the user's speech goes to Flux
             services.stt(settings, CAST),
             director.hearing(),
             user,

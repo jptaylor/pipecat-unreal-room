@@ -65,7 +65,6 @@ ADDRESSEE = "addressee"  # the user's line: who it's for (a choice)...
 INCLUDED = "with:"  # ...prefix of the per-character yes/no questions (is each one included?)
 CHORUS = "chorus"  # ...can a group answer all at once?
 ONLY_IF = "only_if"  # ...and should only those it's true for answer ("say yes if…")?
-TRUE_OF = "true:"  # ...prefix of the per-character yes/no questions: is it true of each?
 INTENT = "intent"  # ...and what the user wants as host
 MOVE = "move"  # ...whether they ask whoever they're talking to to move
 ACT = "act"  # ...or to do something: dance, play the piano, bring them cake…
@@ -410,9 +409,10 @@ NOTE_CHORUS = (
     '"Not me."'
 )
 NOTE_CHORUS_IF = (
-    "The person asked only those it's true for to answer, and they're answering at once, you "
-    "among them: answer out loud in as few words as you can, in character: often just "
-    f'"Me!" (Only if it really isn\'t true for you, write {SILENT}.)'
+    "The person asked only those it's true for to answer, and they're answering at once. "
+    "Decide for yourself, in character: if it's true for you (you want to, say), answer out "
+    'loud in as few words as you can, often just "Me!"; only if it really isn\'t true for you, '
+    f"write {SILENT}."
 )
 NOTE_WELCOME = (
     "The person has just walked in, and everyone at the table says hi at once, out loud. Say hi "
@@ -435,7 +435,10 @@ NOTE_ACT = {
     ),
     "water": "As you answer, you go to water the plants in the conservatory.",
     "stop": "As you answer, you stop what you're doing.",
-    "hand": "As you answer, you hand the person what you're holding.",
+    "hand": (
+        "As you answer, you hand the person what you're holding: just say yes, in a word or two "
+        '("Sure!"), and nothing about it yet: you\'ll say something as you hand it over.'
+    ),
     "art": (
         "As you answer, you go over to your favourite piece, {art}, and give it a spin to show it "
         "off: say which it is, and why you love it, in a sentence."
@@ -444,7 +447,7 @@ NOTE_ACT = {
 # ...asked to dance with no music on: they ask for some first...
 NOTE_NO_MUSIC = (
     "There's no dance music on (a record on the gramophone in the hall), so you don't dance "
-    "yet: say, in a few words, that they'll need to put a record on first."
+    "yet: say yes, you'd love to, and that they'll need to put a record on first, in a few words."
 )
 # ...a flower in the color asked for...
 NOTE_FLOWER_COLOR = "As you answer, you go to pick {to} a {color} flower, to bring it to them."
@@ -455,7 +458,10 @@ NOTE_ACT_FOR = {
         "As you answer, you go to pick {to} a flower, to bring it to them. Don't say what color "
         "it'll be: you'll see when you've picked it."
     ),
-    "hand": "As you answer, you hand {to} what you're holding.",
+    "hand": (
+        "As you answer, you hand {to} what you're holding: just say yes, in a word or two "
+        '("Sure!"), and nothing about it yet: you\'ll say something to {to} as you hand it over.'
+    ),
     "introduce": (
         "{to} isn't here, so as you answer, you lead the way to them: tell the person to follow "
         "you, in your own words ('sure, follow me!'). Don't introduce them yet: you will once "
@@ -469,6 +475,12 @@ NOTE_INTRODUCE_HERE = (
 )
 # ...asked to introduce the user, without saying to whom.
 NOTE_INTRODUCE_WHOM = "Ask the person who they'd like to meet."
+# Speaking to the user for the first time (and nobody's bringing them to be introduced): last in
+# the note, so it isn't lost in the rest.
+NOTE_STRANGER = (
+    "You haven't met the person before: as you speak to them, say who you are and, unless "
+    "they've just said, ask who they are, in a few words (\"I'm {name}. And you are?\")."
+)
 # Something that happened in the house: what's said by whoever reacts to it...
 NOTE_EVENT = {
     "gift": "The person has just given you {item}. React to it out loud, in a few words, in character.",
@@ -483,6 +495,12 @@ NOTE_EVENT = {
         "{who} has just handed you {item}. Say something to {who} about it, in a few words, in "
         "character: thanks, say."
     ),
+    # ...and once they've been introduced, whoever the user's met turns to them.
+    "introduced": (
+        "{who} has just introduced you to the person. Say hello to them, by name if you've heard "
+        'it, in a few words, warmly and in character ("Hi, Sam! Lovely to meet you."), and '
+        "nothing more: it's their turn to talk."
+    ),
     "bell": (
         "Someone has just rung the dinner bell in the kitchen, and you're heading there. Say "
         "something about it out loud, in a few words, in character."
@@ -492,6 +510,11 @@ NOTE_EVENT = {
         "React to it, in a few words, in character."
     ),
     "music_off": "The person has just stopped the music. React to it, in a few words, in character.",
+    # ...stopped while they were dancing to it.
+    "music_off_dancing": (
+        "You were dancing, and the person has just stopped the music. React out loud in a word or "
+        'two, no more: often just "Aww!", "Oh!" or "Dance time\'s over, then."'
+    ),
     "piano": (
         "The person has just plinked out a few notes on the piano. React to it, in a few words, "
         "in character."
@@ -694,20 +717,6 @@ def only_if_question() -> YesNoQuestion:
     )
 
 
-def true_of_question(character: Character) -> YesNoQuestion:
-    """For a "hands up if…": is it true of `character`? (Only used when `only_if` says so.)"""
-    name = character.name
-    return YesNoQuestion(
-        instructions=(
-            f"Suppose `latest` asks only those something is true of to answer ('hands up if…', "
-            f"'say yes if…'). Is it true of {name}, from who they are (`characters`) and what "
-            "they've said in `conversation`?"
-        ),
-        yes=f"it's true of {name}, or likely so for someone like them",
-        no=f"it isn't true of {name}, or unlikely for someone like them",
-    )
-
-
 def intent_question() -> ChoiceQuestion:
     """What the user wants, as the table's host."""
     return ChoiceQuestion(
@@ -901,6 +910,7 @@ def move_question(areas: dict[str, str]) -> ChoiceQuestion:
                 "Go back to what you were doing",
                 "As you were, everyone",
                 "Back to your day",
+                "Get back to work",
             ],
         },
     }
@@ -1081,7 +1091,6 @@ class Reading:
     included: dict[str, float] = field(default_factory=dict)  # each id: one of those asked?
     chorus: float | None = None  # a route: can a group answer at once?
     only_if: float | None = None  # ...and only those it's true for?
-    true_of: dict[str, float] = field(default_factory=dict)  # ...each id: is it true of them?
     intent: dict[str, float] = field(default_factory=dict)  # a route: ANSWER, CARRY_ON, HUSH
     momentum: float | None = None  # a reply read: how much the line asks to be answered, 0 to 1
     react: dict[str, float] = field(default_factory=dict)  # a reply read: each id, NOBODY
@@ -1182,7 +1191,6 @@ class Reading:
             "members": members,  # who answers: the one chosen, or the group in order
             "chorus": None if self.chorus is None else round(self.chorus, 4),
             "only_if": None if self.only_if is None else round(self.only_if, 4),
-            "true_of": rounded(self.true_of),
             "intent": rounded(self.intent),
             "momentum": None if self.momentum is None else round(self.momentum, 4),
             "react": rounded(self.react),
@@ -1243,7 +1251,6 @@ class Referee:
             **{f"{INCLUDED}{c.id}": included_question(c) for c in cast},
             CHORUS: chorus_question(),
             ONLY_IF: only_if_question(),
-            **{f"{TRUE_OF}{c.id}": true_of_question(c) for c in cast},
             INTENT: intent_question(),
             MOVE: move_question(areas),
             ACT: act_question(),
@@ -1297,8 +1304,6 @@ class Referee:
             for name, result in results.items():
                 if name.startswith(INCLUDED) and isinstance(result, YesNoResult):
                     reading.included[name.removeprefix(INCLUDED)] = result.probability
-                elif name.startswith(TRUE_OF) and isinstance(result, YesNoResult):
-                    reading.true_of[name.removeprefix(TRUE_OF)] = result.probability
         return reading
 
     async def reply(

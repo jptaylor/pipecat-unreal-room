@@ -27,6 +27,13 @@ from config import Character
 USER = "user"
 
 
+# What the person's looking at is in the notes only for what they mean by "this" or "those".
+NOTE_LOOKING_ONLY = (
+    'That\'s only so you know what they mean by "this", "that" or "those": don\'t bring it up '
+    "unless they do."
+)
+
+
 @dataclass
 class Space:
     cast: Sequence[Character]
@@ -42,9 +49,17 @@ class Space:
     music: str = ""  # the area where music's playing, if any
     cake: bool = False  # whether there's a cake on the kitchen island
     user_holding: str = ""  # what the player's holding
+    # What the player's looking at (a character's id, or a thing, e.g. "the flowers"), and what
+    # they looked at just before, as the game's cone of their view finds them.
+    user_looking_at: str = ""
+    user_looked_at: str = ""
+    user_also_seeing: str = ""  # looking at someone, the thing in view with them
     heard: set[str] = field(default_factory=set)  # who heard what the player is saying
     earshot_known: bool = False  # whether the game has said who heard the player yet
     talked: set[str] = field(default_factory=set)  # the characters the user has talked with
+    # Those someone's bringing the user to meet, who'll introduce them (the director's): they
+    # don't ask the user who they are (NOTE_STRANGER).
+    being_introduced: set[str] = field(default_factory=set)
 
     @property
     def ids(self) -> list[str]:
@@ -67,6 +82,9 @@ class Space:
         self.known = True
         user = data.get("user") or {}
         self.user_area = str(user.get("area") or "")
+        self.user_looking_at = str(user.get("looking_at") or "")
+        self.user_looked_at = str(user.get("looked_at") or "")
+        self.user_also_seeing = str(user.get("also_seeing") or "")
         for character, state in (data.get("characters") or {}).items():
             if character not in self.ids or not isinstance(state, dict):
                 continue
@@ -146,11 +164,8 @@ class Space:
                 )
             else:
                 parts.append("The person is close enough to talk to.")
-            if me not in self.talked:
-                parts.append(
-                    "You haven't met the person before: if they say hello, say hello back, "
-                    "give your name and ask theirs, in a few words."
-                )
+            if looking := self._looking(me):
+                parts.append(looking)
         else:
             parts.append(
                 f"The person is in {self.area_name(self.user_area)}, too far away to hear you."
@@ -169,6 +184,28 @@ class Space:
         if self.music:
             parts.append(f"Music is playing in {self.area_name(self.music)}.")
         return " ".join(parts)
+
+    def _looking(self, me: str) -> str:
+        """What the person's looking at, for `me`, and what they looked at just before: only so
+        they know what the person means by "this" or "those", and not something to talk about.
+        (Nothing, if they're only looking at `me`.)"""
+
+        def called(seen: str) -> str:
+            return "you" if seen == me else self.name(seen) if seen in self.ids else seen
+
+        parts = []
+        if self.user_looking_at and self.user_also_seeing:
+            parts.append(
+                f"The person is looking at {called(self.user_looking_at)}, with "
+                f"{self.user_also_seeing} in view."
+            )
+        elif self.user_looking_at and self.user_looking_at != me:
+            parts.append(f"The person is looking at {called(self.user_looking_at)}.")
+        if self.user_looked_at and self.user_looked_at != self.user_looking_at:
+            parts.append(f"Just before, they were looking at {called(self.user_looked_at)}.")
+        if not parts:
+            return ""
+        return " ".join(parts) + f" {NOTE_LOOKING_ONLY}"
 
     def _in(self, character: str) -> str:
         """Where `character` is now, e.g. "in the kitchen"."""

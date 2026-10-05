@@ -37,7 +37,6 @@ from config import (
     REACT_FLOOR,
     REPLY_FLOOR,
     TABLE_FLOOR,
-    TRUE_OF_FLOOR,
 )
 from room import (
     CARRY_ON,
@@ -259,19 +258,11 @@ class Engine:
                 return Plan([take], why="addressed", addressed=members)
             if (reading.chorus or 0.0) >= CHORUS_FLOOR:
                 if (reading.only_if or 0.0) >= ONLY_IF_FLOOR:
-                    # "Hands up if…": only those Jev reads it as true of answer; the rest stay
-                    # quiet, and if it's true of nobody, nobody does. Everyone is told who it
-                    # was for, so the rest don't take it as still open.
-                    those = [c for c in members if reading.true_of.get(c, 0.0) >= TRUE_OF_FLOOR]
-                    if those:
-                        verb = "answers" if len(those) == 1 else "answer"
-                        who = names([transcript.label(c) for c in those])
-                        aside = f"{who} {verb} that; it isn't true of the others, who stay quiet."
-                    else:
-                        aside = "That isn't true of anyone at the table, so nobody answers."
-                    takes = [Take(m, "chorus", NOTE_CHORUS_IF, USER) for m in those]
-                    why = "chorus" if those else "nobody"
-                    return Plan(takes, True, why, addressed=those, aside=aside)
+                    # "Hands up if…": each of them knows best whether it's true of them (whether
+                    # they want to dance, say), so all of them are asked, and those it isn't
+                    # true of stay quiet.
+                    takes = [Take(m, "chorus", NOTE_CHORUS_IF, USER) for m in members]
+                    return Plan(takes, True, "chorus", addressed=members)
                 note = NOTE_CHORUS.format(who=everyone_or(members, transcript))
                 takes = [Take(m, "chorus", note, USER) for m in members]
                 return Plan(takes, True, "chorus", addressed=members)

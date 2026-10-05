@@ -50,6 +50,15 @@ struct FRoomSpot
 	float Yaw = 0.0f;
 };
 
+// Something in the house the player can look at: what it's called, e.g. "the
+// gramophone" or "a sofa", where its middle is, and about how big it is.
+struct FRoomSight
+{
+	FString Name;
+	FVector Center = FVector::ZeroVector;
+	float Radius = 50.0f;
+};
+
 // The house: rooms with doorways between them, windows and skylights, plain
 // furniture, all flat colors, lit by the sun and the sky through the windows,
 // and by lamps that swing and sweep, all casting shadows. It also finds the
@@ -111,6 +120,10 @@ public:
 	int32 GetSculptureCount() const { return Sculptures.Num(); }
 	FVector GetSculptureLocation(int32 Index) const;
 	void SpinSculpture(int32 Index, float Degrees);
+
+	/** What the player can look at in the house, built into it: its furniture, trees, sculptures and paintings. */
+	const TArray<FRoomSight>& GetSights() const { return Sights; }
+	void AddSight(const FString& Name, const FVector& Center, float Radius) { Sights.Add({Name, Center, Radius}); }
 
 	/** The hall's lamps, as party lights: how much (0 to 1), on what beat, and how loud the music is. */
 	void SetParty(float Amount, double Beat, float Loudness);
@@ -254,6 +267,7 @@ private:
 
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> Sculptures;
+	TArray<FRoomSight> Sights;
 
 	float Party = 0.0f;
 	float PartyTarget = 0.0f;

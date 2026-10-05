@@ -157,9 +157,6 @@ class Table:
                 f"asked: {' '.join(asked)}  chorus {reading.chorus or 0:.2f}"
                 f"  only-if {reading.only_if or 0:.2f}"
             )
-            if (reading.only_if or 0) >= 0.5:
-                true = [f"{k} {v:.2f}" for k, v in reading.true_of.items()]
-                bits.append("true of: " + " ".join(true))
         if reading.intent:
             bits.append(" ".join(f"{k} {v:.2f}" for k, v in reading.intent.items()))
         if nxt is not None:

@@ -358,6 +358,7 @@ void ARoomHouse::AddPicture(const FVector& Center, const FVector& Facing, float 
 {
 	// A frame, proud of the wall, and a canvas of colored blocks, flat as the
 	// rest of the house, in bands.
+	AddSight(TEXT("a painting of colored blocks"), Center, FMath::Max(Width, Height) * 0.45f);
 	const FVector Along = FVector::CrossProduct(FVector::UpVector, Facing).GetSafeNormal();
 	const FRotator Rotation = Facing.Rotation();
 	AddMesh(Cube, FTransform(Rotation, Center + Facing * 3.0f, FVector(0.06f, (Width + 12.0f) / 100.0f, (Height + 12.0f) / 100.0f)),
@@ -705,6 +706,7 @@ void ARoomHouse::BuildConservatory()
 			}
 			Growth.Add(1.0f);
 			Grown.Add(1.0f);
+			AddSight(TEXT("one of the trees"), FVector(X, Y, 70.0f + Tall * 0.75f), 150.0f);
 			++Tree;
 		}
 	}
@@ -847,6 +849,10 @@ void ARoomHouse::BuildGallery()
 	const FLinearColor Colors[] = {
 		Srgb(232, 120, 100), Srgb(226, 182, 72), Srgb(60, 150, 150), Srgb(176, 150, 210), Srgb(236, 236, 230), Srgb(90, 120, 200),
 	};
+	// What each is called, as the characters know them (bot/room.py's SCULPTURES).
+	const TCHAR* Names[] = {
+		TEXT("the coral ball"), TEXT("the golden cone"), TEXT("the teal cube"), TEXT("the lavender ball"), TEXT("the white cone"), TEXT("the blue cube"),
+	};
 	int32 Piece = 0;
 	for (float X : {-1900.0f, -1500.0f, -1100.0f})
 	{
@@ -870,6 +876,7 @@ void ARoomHouse::BuildGallery()
 			// Each spins, when the player gives it a push.
 			Sculpture->SetMobility(EComponentMobility::Movable);
 			Sculptures.Add(Sculpture);
+			AddSight(Names[Piece % 6], Sculpture->GetComponentLocation(), 45.0f);
 			AddSpotLight(FVector(X, Y * 0.8f, Height - 10.0f), (FVector(X, Y, 130.0f) - FVector(X, Y * 0.8f, Height - 10.0f)).Rotation(),
 				Warm(4300.0f), 160.0f, 900.0f, 18.0f);
 			++Piece;
@@ -904,6 +911,7 @@ void ARoomHouse::AddSofa(const FVector& Center, float Yaw, float Width, const FL
 {
 	// Facing along Yaw: a seat, a back behind it, arms either end, cushions
 	// on the seat, and a couple of pillows against the back.
+	AddSight(TEXT("a sofa"), Center + FVector(0.0f, 0.0f, 45.0f), FMath::Max(Width * 0.42f, 60.0f));
 	const FRotator Facing(0.0f, Yaw, 0.0f);
 	auto At = [&](float Ahead, float Right, float Up) { return Center + Facing.RotateVector(FVector(Ahead, Right, Up)); };
 	const float Depth = 90.0f;
@@ -931,6 +939,7 @@ void ARoomHouse::AddSofa(const FVector& Center, float Yaw, float Width, const FL
 
 void ARoomHouse::AddTableLamp(const FVector& Base, const FLinearColor& Shade, float Bright)
 {
+	AddSight(TEXT("a lamp"), Base + FVector(0.0f, 0.0f, 32.0f), 22.0f);
 	AddCylinder(Base, 9.0f, 3.0f, Srgb(60, 52, 46), 0.4f, false);
 	AddCylinder(Base, 1.5f, 40.0f, Srgb(184, 150, 96), 0.3f, false);
 	UStaticMeshComponent* Lampshade = AddCylinder(Base + FVector(0.0f, 0.0f, 34.0f), 17.0f, 22.0f, Shade, 0.7f, false);
@@ -941,6 +950,7 @@ void ARoomHouse::AddTableLamp(const FVector& Base, const FLinearColor& Shade, fl
 
 void ARoomHouse::AddFloorLamp(const FVector& Base)
 {
+	AddSight(TEXT("a floor lamp"), Base + FVector(0.0f, 0.0f, 110.0f), 35.0f);
 	AddCylinder(Base, 16.0f, 3.0f, Srgb(40, 40, 44), 0.4f);
 	AddCylinder(Base, 2.0f, 150.0f, Srgb(40, 40, 44), 0.4f, false);
 	const FLinearColor Shade = Srgb(250, 232, 200);
@@ -952,6 +962,7 @@ void ARoomHouse::AddFloorLamp(const FVector& Base)
 
 void ARoomHouse::AddSideTable(const FVector& Base, float Size, float Height, const FLinearColor& Color)
 {
+	AddSight(TEXT("a side table"), Base + FVector(0.0f, 0.0f, Height * 0.6f), FMath::Max(Size * 0.5f, 25.0f));
 	AddCylinder(Base, Size * 0.18f, Height - 4.0f, Color, 0.5f);
 	AddCylinder(Base + FVector(0.0f, 0.0f, Height - 4.0f), Size * 0.5f, 4.0f, Color, 0.35f);
 }
@@ -960,6 +971,7 @@ void ARoomHouse::AddPottedPlant(const FVector& Base, float Scale, const FLinearC
 {
 	// A pot, and a bushy plant of a few leafy balls, which the camera stays
 	// out of.
+	AddSight(TEXT("a potted plant"), Base + FVector(0.0f, 0.0f, 100.0f * Scale), 55.0f * Scale);
 	AddCylinder(Base, 26.0f * Scale, 42.0f * Scale, Pot, 0.7f);
 	AddCylinder(Base + FVector(0.0f, 0.0f, 42.0f * Scale), 23.0f * Scale, 2.0f, Srgb(70, 54, 44), 0.95f, false);
 	const FVector Leaves[] = {
@@ -993,6 +1005,7 @@ void ARoomHouse::AddSconce(const FVector& At, const FVector& Facing)
 
 void ARoomHouse::AddFruitBowl(const FVector& At)
 {
+	AddSight(TEXT("a bowl of fruit"), At + FVector(0.0f, 0.0f, 10.0f), 18.0f);
 	AddMesh(Sphere, FTransform(FRotator::ZeroRotator, At + FVector(0.0f, 0.0f, 5.0f), FVector(0.3f, 0.3f, 0.12f)), Srgb(236, 232, 222), 0.3f, false);
 	const FLinearColor Fruit[] = {Srgb(214, 46, 36), Srgb(246, 196, 64), Srgb(250, 130, 70), Srgb(120, 170, 70)};
 	for (int32 I = 0; I < 4; ++I)
@@ -1005,6 +1018,7 @@ void ARoomHouse::AddFruitBowl(const FVector& At)
 void ARoomHouse::AddBooks(const FVector& At, float Yaw, int32 Count, int32 Seed)
 {
 	// A stack, each a little turned.
+	AddSight(TEXT("a stack of books"), At + FVector(0.0f, 0.0f, Count * 2.0f), 18.0f);
 	FRandomStream Random(Seed);
 	const FLinearColor Covers[] = {Srgb(170, 60, 60), Srgb(60, 90, 140), Srgb(226, 196, 120), Srgb(70, 120, 90), Srgb(236, 230, 214)};
 	float Z = 0.0f;

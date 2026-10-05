@@ -39,6 +39,8 @@ const float GiveReach = 210.0f;
 // How far each kind of thing that happens is seen or heard, in cm.
 const float SeenFrom = 900.0f;
 const float MusicHeardFrom = 1400.0f;
+// The cook starts the day baking, this many seconds in, so there's cake soon after.
+const float FirstBake = 3.0f;
 
 FString ToJson(const TSharedRef<FJsonObject>& Object)
 {
@@ -294,6 +296,16 @@ void ARoomStage::Interact()
 		Things->SetGramophone(bOn);
 		Data->SetBoolField(TEXT("on"), bOn);
 		Data->SetStringField(TEXT("place"), TEXT("the hall"));
+		// Who was dancing to it, as it stops.
+		TArray<FString> Dancing;
+		for (ARoomCharacter* Character : Characters)
+		{
+			if (Character->IsDancing())
+			{
+				Dancing.Add(Character->GetId());
+			}
+		}
+		Data->SetArrayField(TEXT("dancing"), Strings(Dancing));
 		Event(TEXT("music"), Data, Witnesses(Things->GetLocation(Thing), MusicHeardFrom));
 	}
 	else if (Thing == TEXT("piano"))
@@ -603,6 +615,7 @@ void ARoomStage::WalkToGuest(FIntroduction& Introduction)
 		return;
 	}
 	Introduction.Walked = Clock;
+	Introduction.GuestAt = Guest->GetActorLocation();
 	const FVector Spot = House->FindSpotBy(Guest->GetActorLocation(), Host->GetActorLocation(), 140.0f);
 	const float Yaw = (Guest->GetActorLocation() - Spot).Rotation().Yaw;
 	Host->Do({FRoomStep::WalkTo(Spot, Yaw)}, FString::Printf(TEXT("taking the person to meet %s"), *Guest->GetCast().Name));
@@ -631,9 +644,10 @@ void ARoomStage::UpdateIntroductions()
 		{
 			continue;  // still on the way
 		}
-		// The guest's moved on (finished at the piano, say): after them, once
-		// they've stopped.
-		if (FVector::Dist2D(Host->GetActorLocation(), Guest->GetActorLocation()) > 280.0f)
+		// The guest's moved on (finished at the piano, say), or the host couldn't get
+		// near them: after them, once they've stopped.
+		if (FVector::Dist2D(Guest->GetActorLocation(), Each.GuestAt) > 150.0f
+			|| FVector::Dist2D(Host->GetActorLocation(), Guest->GetActorLocation()) > 450.0f)
 		{
 			if (Clock - Each.Walked > 1.5 && Guest->GetVelocity().Size2D() < 40.0f)
 			{
@@ -649,12 +663,15 @@ void ARoomStage::UpdateIntroductions()
 		{
 			continue;
 		}
-		// The guest stops what they're doing, to meet the player.
+		// The guest stops what they're doing, to meet the player, right where they are
+		// (not off back to their place), and stays, like the host, until they're sent
+		// back to their day.
 		if (Guest->IsBusy())
 		{
 			Guest->StopDoing();
 		}
 		Guest->SetDancing(false);
+		Guest->SetIntent(ERoomIntent::Wait);
 		Host->TalkTo(Guest);
 		Guest->LookAt(Host, 6.0f);
 		TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -753,7 +770,7 @@ void ARoomStage::UpdateLife(float DeltaSeconds)
 		// not in the same room, and not talking with them lately.
 		if (!NextRoutine.Contains(Id))
 		{
-			NextRoutine.Add(Id, Clock + FMath::FRandRange(12.0f, 30.0f));
+			NextRoutine.Add(Id, Clock + (Character->GetCast().Home == TEXT("kitchen") ? FirstBake : FMath::FRandRange(12.0f, 30.0f)));
 			NextVisit.Add(Id, Clock + FMath::FRandRange(70.0f, 140.0f));
 		}
 		if (bSpeaks)
@@ -815,8 +832,8 @@ void ARoomStage::Routine(ARoomCharacter* Character)
 	const FName Home = Character->GetCast().Home;
 	if (Home == TEXT("kitchen"))
 	{
-		// The chef bakes, or has something on the stove.
-		if (!Things->HasCake() && FMath::RandBool())
+		// The chef bakes, if there's no cake, or has something on the stove.
+		if (!Things->HasCake())
 		{
 			Act(Character, TEXT("cook"));
 			return;

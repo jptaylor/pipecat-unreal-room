@@ -83,6 +83,9 @@ public:
 	};
 	bool FindInteraction(const FVector& Where, const FVector& Facing, ERoomItem Held, FInteraction& Out) const;
 
+	/** What the player can look at among them, as they are now: the cake, say, or its empty stand. */
+	void GetSights(TArray<FRoomSight>& Out) const;
+
 	/** Where a thing is, e.g. "gramophone", for who hears or sees what's done with it. */
 	FVector GetLocation(FName Thing, int32 Index = 0) const;
 

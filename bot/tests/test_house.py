@@ -80,8 +80,7 @@ def test_the_game_says_who_hears_whom() -> None:
     assert space.near_user() == {THEO, JUNO}
     assert space.situation(THEO) == (
         "You're in the kitchen, with Juno. Maya (in the conservatory) isn't close enough to hear "
-        "you. The person is here with you, close enough to talk to. You haven't met the person "
-        "before: if they say hello, say hello back, give your name and ask theirs, in a few words."
+        "you. The person is here with you, close enough to talk to."
     )
     space.talked_with(THEO)
     assert space.situation(THEO) == (
@@ -90,6 +89,52 @@ def test_the_game_says_who_hears_whom() -> None:
     )
     assert "following the person" in space.situation(JUNO)
     assert "The person is in the kitchen, too far away to hear you." in space.situation(MAYA)
+
+
+def test_those_near_the_user_know_what_theyre_looking_at() -> None:
+    space = Space(CAST)
+    space.world(AREAS)
+    near = {
+        MAYA: {"area": "conservatory", "hears": [USER, JUNO]},
+        JUNO: {"area": "conservatory", "hears": [USER, MAYA]},
+        THEO: {"area": "kitchen", "hears": []},
+    }
+    space.update(
+        {
+            "user": {
+                "area": "conservatory",
+                "looking_at": "the flowers",
+                "looked_at": "the tomato plants",
+            },
+            "characters": near,
+        }
+    )
+    assert (
+        "The person is looking at the flowers. Just before, they were looking at the tomato "
+        "plants. That's only so you know what they mean" in space.situation(MAYA)
+    )
+    assert "looking at" not in space.situation(THEO)  # he can't see them from the kitchen
+    # Turned to Maya to ask her about them.
+    space.update(
+        {
+            "user": {"area": "conservatory", "looking_at": MAYA, "looked_at": "the flowers"},
+            "characters": near,
+        }
+    )
+    maya = space.situation(MAYA)
+    assert "looking at you" not in maya  # nothing to say about that
+    assert "Just before, they were looking at the flowers." in maya
+    assert "The person is looking at Maya." in space.situation(JUNO)
+    # Maya's standing by the flowers.
+    space.update(
+        {
+            "user": {"area": "conservatory", "looking_at": MAYA, "also_seeing": "the flowers"},
+            "characters": near,
+        }
+    )
+    assert "The person is looking at you, with the flowers in view." in space.situation(MAYA)
+    space.update({"user": {"area": "conservatory"}, "characters": near})
+    assert "looking at" not in space.situation(MAYA)
 
 
 def test_only_those_the_user_has_met_speak_up_unasked() -> None:

@@ -263,6 +263,21 @@ void ARoomCharacter::SetIntent(ERoomIntent InIntent, FName Area)
 		Area.IsNone() ? TEXT("") : *Area.ToString());
 }
 
+void ARoomCharacter::Settle()
+{
+	if (Intent != ERoomIntent::Home)
+	{
+		return;  // doing what the player asked already
+	}
+	Intent = ERoomIntent::Wait;
+	if (Steps.IsEmpty() && bWalking)
+	{
+		Stop();  // on the way back to their place: no further
+	}
+	RestYaw = GetActorRotation().Yaw;
+	UE_LOG(LogRoomCharacter, Log, TEXT("%s: staying with the player"), *Info.Id);
+}
+
 const TCHAR* ARoomCharacter::GetIntentName() const
 {
 	switch (Intent)

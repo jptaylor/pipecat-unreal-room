@@ -92,6 +92,12 @@ public:
 
 	/** What they're asked to do: e.g. follow the player, or go to an area (Go). */
 	void SetIntent(ERoomIntent InIntent, FName Area = NAME_None);
+	/**
+	 * They've talked with the player: from now on they stay where they are
+	 * (Wait), rather than back to their place and their day, until they're
+	 * sent back to it. What they're doing now, they finish.
+	 */
+	void Settle();
 	ERoomIntent GetIntent() const { return Intent; }
 	const TCHAR* GetIntentName() const;
 

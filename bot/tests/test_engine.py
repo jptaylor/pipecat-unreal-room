@@ -117,20 +117,14 @@ def test_a_quick_question_to_everyone_is_answered_all_at_once(engine: Engine) ->
     assert "everyone is answering at once" in (plan.takes[0].note or "")
 
 
-def test_hands_up_if_only_those_it_is_true_of_answer(engine: Engine) -> None:
-    said(engine, "Hands up if you've ever been on a boat.")
+def test_hands_up_if_everyone_asked_answers_for_themselves(engine: Engine) -> None:
+    said(engine, "Say yes if you want to dance.")
     reading = route(GROUP, {GROUP: 0.9}, {c: 0.9 for c in IDS}, chorus=0.9)
     reading.only_if = 0.85
-    reading.true_of = {c: 0.1 for c in IDS} | {OTTO: 0.95, JUNO: 0.6}
     plan = engine.route(reading)
-    assert plan.together and sorted(t.speaker for t in plan.takes) == sorted([OTTO, JUNO])
-    # The rest are told it wasn't for them, so they don't answer it later.
-    assert "Juno and Otto answer that" in engine.transcript.view(MAYA)[-1]["content"]
-    # True of nobody: nobody answers (not everyone, as for a group nobody is sure of).
-    said(engine, "Say yes if you've been to the moon.")
-    reading = route(GROUP, {GROUP: 0.9}, {c: 0.9 for c in IDS}, chorus=0.9)
-    reading.only_if, reading.true_of = 0.9, {c: 0.05 for c in IDS}
-    assert engine.route(reading).takes == [] and engine.route(reading).why == "nobody"
+    # Each knows best if it's true of them: those it isn't stay quiet.
+    assert plan.together and sorted(t.speaker for t in plan.takes) == sorted(IDS)
+    assert all("Decide for yourself" in (t.note or "") for t in plan.takes)
 
 
 def test_a_group_nobody_is_sure_of_is_everyone(engine: Engine) -> None:
